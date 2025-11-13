@@ -150,13 +150,19 @@ _read_key() {
     if [ "$char" = "$(printf '\033')" ]; then
         char2=$(dd bs=1 count=2 2>/dev/null)
         case "$char2" in
-            '[A') key="up" ;; 
-            '[B') key="down" ;; 
+            '[A') key="up" ;;
+            '[B') key="down" ;;
         esac
     elif [ "$char" = "$(printf '\n')" ] || [ "$char" = "$(printf '\r')" ]; then
         key="enter"
     elif [ "$char" = " " ]; then
         key="space"
+    elif [ "$char" = "$(printf '\t')" ]; then
+        key="tab"
+    elif [ "$char" = "a" ]; then
+        key="selectall"
+    elif [ "$char" = "u" ]; then
+        key="unselectall"
     elif [ "$char" = "q" ]; then
         key="quit"
     fi
@@ -168,7 +174,8 @@ draw_interface() {
     printf "${C_BOLD}${C_CYAN}╔══════════════════════════════════════════════════════════════════════╗\n"
     printf "║                  gcl.sh - Git Sync Manager                     ║\n"
     printf "╚══════════════════════════════════════════════════════════════════════╝${C_RESET}\n"
-    printf "  ${C_YELLOW}Navigate with ↑/↓, Toggle with SPACE, Execute with ENTER, Quit with 'q'${C_RESET}\n\n"
+    printf "  ${C_YELLOW}Navigate: ↑/↓  Switch: TAB  Toggle: SPACE  Run: ENTER  Quit: q${C_RESET}\n"
+    printf "  ${C_YELLOW}Select All: a  Unselect All: u${C_RESET}\n\n"
 
     # --- Strategy Selection ---
     _line=5; _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}MERGE STRATEGY (On Conflict):${C_RESET}"
@@ -279,24 +286,37 @@ run_interactive_mode() {
                 else
                     _current_field=$(((_current_field - 1 + _total_fields) % _total_fields))
                 fi
-                ;; 
+                ;;
             down)
                 if [ "$_current_field" -eq 2 ]; then # In repo list
                     _repo_cursor_index=$(( (_repo_cursor_index + 1) % _repo_count ))
                 else
                     _current_field=$(((_current_field + 1) % _total_fields))
                 fi
-                ;; 
-            space) 
+                ;;
+            tab)
+                _current_field=$(((_current_field + 1) % _total_fields))
+                ;;
+            selectall)
+                # Select all repositories
+                _repo_selection=""
+                i=1; while [ "$i" -le "$_repo_count" ]; do _repo_selection="${_repo_selection}y"; i=$((i+1)); done
+                ;;
+            unselectall)
+                # Unselect all repositories
+                _repo_selection=""
+                i=1; while [ "$i" -le "$_repo_count" ]; do _repo_selection="${_repo_selection}n"; i=$((i+1)); done
+                ;;
+            space)
                 case "$_current_field" in
-                    0) _strategy_selected=$((1 - _strategy_selected)) ;; 
-                    1) _action_selected=$(((_action_selected + 1) % 3)) ;; 
+                    0) _strategy_selected=$((1 - _strategy_selected)) ;;
+                    1) _action_selected=$(((_action_selected + 1) % 3)) ;;
                     2) # Toggle repo selection
                         current_char=$(echo "$_repo_selection" | cut -c $((_repo_cursor_index + 1)))
                         new_char=$([ "$current_char" = "y" ] && echo "n" || echo "y")
                         _repo_selection=$(echo "$_repo_selection" | sed "s/./$new_char/$((_repo_cursor_index + 1))")
                         ;;
-                    3) run_tui_action; break ;; 
+                    3) run_tui_action; break ;;
                 esac
                 ;; 
             enter) [ "$_current_field" -eq 3 ] && { run_tui_action; break; };;
