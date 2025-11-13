@@ -4,12 +4,12 @@
 
 # Repository lists
 PUBLIC_REPOS="
-profile:https://github.com/diegonmarcos/diegonmarcos.git:git@github.com:diegonmarcos/diegonmarcos.git
+front-Github_profile:https://github.com/diegonmarcos/diegonmarcos.git:git@github.com:diegonmarcos/diegonmarcos.git
+front-Github_io:https://github.com/diegonmarcos/diegonmarcos.github.io.git:git@github.com:diegonmarcos/diegonmarcos.github.io.git
 back-Mylibs:https://github.com/diegonmarcos/back-Mylibs.git:git@github.com:diegonmarcos/back-Mylibs.git
 back-System:https://github.com/diegonmarcos/back-System.git:git@github.com:diegonmarcos/back-System.git
 back-Algo:https://github.com/diegonmarcos/back-Algo.git:git@github.com:diegonmarcos/back-Algo.git
 back-Graphic:https://github.com/diegonmarcos/back-Graphic.git:git@github.com:diegonmarcos/back-Graphic.git
-website:https://github.com/diegonmarcos/diegonmarcos.github.io.git:git@github.com:diegonmarcos/diegonmarcos.github.io.git
 cyber-Cyberwarfare:https://github.com/diegonmarcos/cyber-Cyberwarfare.git:git@github.com:diegonmarcos/cyber-Cyberwarfare.git
 ops-Tooling:https://github.com/diegonmarcos/ops-Tooling.git:git@github.com:diegonmarcos/ops-Tooling.git
 ml-MachineLearning:https://github.com/diegonmarcos/ml-MachineLearning.git:git@github.com:diegonmarcos/ml-MachineLearning.git

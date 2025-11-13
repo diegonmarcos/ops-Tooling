@@ -4,12 +4,18 @@ import os
 import subprocess
 import sys
 import curses
+import argparse
 
 # Repository definitions
 REPOSITORIES = {
-    'profile': {
+    'front_Github_profile': {
         'https': 'https://github.com/diegonmarcos/diegonmarcos.git',
         'ssh': 'git@github.com:diegonmarcos/diegonmarcos.git',
+        'public': True
+    },
+    'front_Gitub_io': {
+        'https': 'https://github.com/diegonmarcos/diegonmarcos.github.io.git',
+        'ssh': 'git@github.com:diegonmarcos/diegonmarcos.github.io.git',
         'public': True
     },
     'back-Mylibs': {
@@ -30,11 +36,6 @@ REPOSITORIES = {
     'back-Graphic': {
         'https': 'https://github.com/diegonmarcos/back-Graphic.git',
         'ssh': 'git@github.com:diegonmarcos/back-Graphic.git',
-        'public': True
-    },
-    'website': {
-        'https': 'https://github.com/diegonmarcos/diegonmarcos.github.io.git',
-        'ssh': 'git@github.com:diegonmarcos/diegonmarcos.github.io.git',
         'public': True
     },
     'cyber-Cyberwarfare': {
@@ -386,15 +387,106 @@ class GitManager:
                 stdscr.refresh()
 
 
+def parse_arguments():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description='Git Clone/Pull Manager - Manage multiple GitHub repositories',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s                           # Interactive TUI mode
+  %(prog)s -m ssh -s remote          # CLI: SSH with remote strategy
+  %(prog)s --mode https --strategy local  # CLI: HTTPS with local strategy
+
+Modes:
+  https - Use HTTPS URLs (public repositories only)
+  ssh   - Use SSH URLs (all repositories including private)
+
+Strategies:
+  local  - Keep local changes on conflicts (merge -X ours)
+  remote - Keep remote changes on conflicts (merge -X theirs)
+        """
+    )
+
+    parser.add_argument(
+        '-m', '--mode',
+        choices=['https', 'ssh'],
+        help='Authentication mode (https or ssh). If not specified, launches interactive mode.'
+    )
+
+    parser.add_argument(
+        '-s', '--strategy',
+        choices=['local', 'remote'],
+        default='remote',
+        help='Merge strategy for conflicts (default: remote)'
+    )
+
+    parser.add_argument(
+        '-v', '--version',
+        action='version',
+        version='%(prog)s 1.0.0'
+    )
+
+    return parser.parse_args()
+
+
 def main():
     """Entry point."""
+    args = parse_arguments()
     manager = GitManager()
-    try:
-        curses.wrapper(manager.run)
-        print("Goodbye!")
-    except KeyboardInterrupt:
-        print("\n\nInterrupted by user. Exiting...")
-        sys.exit(0)
+
+    # Check if mode is specified (CLI mode)
+    if args.mode:
+        # Command-line mode
+        print("\033[1m\033[96m╔══════════════════════════════════════════════════════════════════════╗\033[0m")
+        print("\033[1m\033[96m║       Git Clone/Pull Manager - Diego's Repositories                 ║\033[0m")
+        print("\033[1m\033[96m╚══════════════════════════════════════════════════════════════════════╝\033[0m")
+        print()
+
+        # Set mode and strategy
+        manager.mode_selected = 0 if args.mode == 'https' else 1
+        manager.strategy_selected = 0 if args.strategy == 'local' else 1
+
+        # Display settings
+        mode_name = 'HTTPS (Public only)' if manager.mode_selected == 0 else 'SSH (All repos)'
+        strategy_name = 'LOCAL' if manager.strategy_selected == 0 else 'REMOTE'
+
+        print(f"\033[93mMode: \033[0m\033[1m{mode_name}\033[0m")
+        print(f"\033[93mStrategy: \033[0m\033[1mKeep {strategy_name} changes on conflicts\033[0m")
+        print("\033[94m════════════════════════════════════════════════════════════════════════\033[0m")
+        print()
+
+        # Process repositories
+        success_count = 0
+        fail_count = 0
+
+        url_type = 'https' if manager.mode_selected == 0 else 'ssh'
+        merge_strategy = 'ours' if manager.strategy_selected == 0 else 'theirs'
+
+        for repo_name, repo_info in REPOSITORIES.items():
+            # Skip private repos in HTTPS mode
+            if manager.mode_selected == 0 and not repo_info['public']:
+                continue
+
+            url = repo_info[url_type]
+            if manager.clone_or_pull(repo_name, url, merge_strategy):
+                success_count += 1
+            else:
+                fail_count += 1
+            print()
+
+        print("\033[94m════════════════════════════════════════════════════════════════════════\033[0m")
+        print(f"\033[1m\033[92mComplete! Success: {success_count} | Failed: {fail_count}\033[0m")
+        print("\033[94m════════════════════════════════════════════════════════════════════════\033[0m")
+
+    else:
+        # Interactive TUI mode
+        try:
+            curses.wrapper(manager.run)
+            print("Goodbye!")
+        except KeyboardInterrupt:
+            print("\n\nInterrupted by user. Exiting...")
+            sys.exit(0)
 
 
 if __name__ == "__main__":
