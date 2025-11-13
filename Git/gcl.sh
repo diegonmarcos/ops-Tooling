@@ -25,7 +25,7 @@ ALL_REPOS="${PUBLIC_REPOS}${PRIVATE_REPOS}"
 
 # --- TUI State Variables ---
 _strategy_selected=1      # 0=LOCAL, 1=REMOTE (default)
-_action_selected=0        # 0=PULL, 1=SYNC, 2=PUSH
+_action_selected=0        # 0=SYNC (default), 1=PUSH, 2=PULL
 _repo_cursor_index=0      # For scrolling through repos
 _repo_selection=""        # A string of 'y'/'n' for each repo
 _repo_list=""             # A newline-separated list of repo names
@@ -142,6 +142,52 @@ run_cli_pull() {
     done
 }
 
+run_cli_status() {
+    repos_to_process="${1:-$ALL_REPOS}"
+    _log "Checking Git Status for Repositories"
+    printf "%s" "$repos_to_process" | while IFS=: read -r repo_dir repo_url;
+        do
+        [ -z "$repo_dir" ] && continue
+        if ! echo "$repo_dir" | grep -q ':'; then
+            repo_url=$(printf "%s" "$ALL_REPOS" | grep "^${repo_dir}:" | cut -d: -f2-)
+        fi
+
+        if ! [ -d "$repo_dir" ]; then
+            _warn "'$repo_dir' not cloned yet."
+            printf "\n"
+            continue
+        fi
+
+        _log "Checking '$repo_dir'"
+
+        # Check for uncommitted changes (staged and unstaged)
+        if ! git -C "$repo_dir" diff-index --quiet HEAD -- 2>/dev/null; then
+            _warn "Has uncommitted changes (staged or unstaged)"
+            printf "  ${C_YELLOW}Files changed:${C_RESET}\n"
+            git -C "$repo_dir" status --short | sed 's/^/    /'
+        else
+            _success "Working tree clean"
+        fi
+
+        # Check for unpushed commits
+        unpushed=$(git -C "$repo_dir" log @{u}.. --oneline 2>/dev/null | wc -l)
+        if [ "$unpushed" -gt 0 ]; then
+            _warn "Has $unpushed unpushed commit(s)"
+            printf "  ${C_YELLOW}Unpushed commits:${C_RESET}\n"
+            git -C "$repo_dir" log @{u}.. --oneline | sed 's/^/    /'
+        else
+            # Check if branch tracks a remote
+            if git -C "$repo_dir" rev-parse @{u} >/dev/null 2>&1; then
+                _success "All commits pushed"
+            else
+                _warn "Branch does not track a remote"
+            fi
+        fi
+
+        printf "\n"
+    done
+}
+
 # --- TUI Functions ---
 _read_key() {
     char=""
@@ -193,17 +239,22 @@ draw_interface() {
     _line=$((_line + 2)); _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}ACTION:${C_RESET}"
     _line=$((_line + 1)); _move_cursor $_line 4
     [ "$_current_field" -eq 1 ] && printf "$C_BG_BLUE"
-    printf "[%s] PULL   (Remote -> Local)" "$([ "$_action_selected" -eq 0 ] && printf "●" || printf " ")"
+    printf "[%s] SYNC   (Remote <-> Local)" "$([ "$_action_selected" -eq 0 ] && printf "●" || printf " ")"
     printf "$C_RESET"
 
     _line=$((_line + 1)); _move_cursor $_line 4
     [ "$_current_field" -eq 1 ] && printf "$C_BG_BLUE"
-    printf "[%s] SYNC   (Remote <-> Local)" "$([ "$_action_selected" -eq 1 ] && printf "●" || printf " ")"
+    printf "[%s] PUSH   (Local -> Remote)" "$([ "$_action_selected" -eq 1 ] && printf "●" || printf " ")"
     printf "$C_RESET"
 
     _line=$((_line + 1)); _move_cursor $_line 4
     [ "$_current_field" -eq 1 ] && printf "$C_BG_BLUE"
-    printf "[%s] PUSH   (Local -> Remote)" "$([ "$_action_selected" -eq 2 ] && printf "●" || printf " ")"
+    printf "[%s] PULL   (Remote -> Local)" "$([ "$_action_selected" -eq 2 ] && printf "●" || printf " ")"
+    printf "$C_RESET"
+
+    _line=$((_line + 1)); _move_cursor $_line 4
+    [ "$_current_field" -eq 1 ] && printf "$C_BG_BLUE"
+    printf "[%s] STATUS (Check repos)" "$([ "$_action_selected" -eq 3 ] && printf "●" || printf " ")"
     printf "$C_RESET\n"
 
     # --- Repository Selection ---
@@ -239,30 +290,41 @@ draw_interface() {
 run_tui_action() {
     _restore_term; _clear_screen
     strategy="theirs"; [ "$_strategy_selected" -eq 0 ] && strategy="ours"
-    
+
     # Build the list of selected repos
     selected_repos=""
     i=0
-    printf "%s" "$_repo_list" | while IFS= read -r repo_name || [ -n "$repo_name" ]; do
+    while IFS= read -r repo_name || [ -n "$repo_name" ]; do
         is_selected=$(echo "$_repo_selection" | cut -c $((i + 1)))
         if [ "$is_selected" = "y" ]; then
-            selected_repos="${selected_repos}${repo_name}\n"
+            selected_repos="${selected_repos}${repo_name}
+"
         fi
         i=$((i + 1))
-    done
+    done <<EOF
+$_repo_list
+EOF
 
     if [ -z "$selected_repos" ]; then
         _warn "No repositories selected. Nothing to do."
     else
         case "$_action_selected" in
-            0) run_cli_pull "$selected_repos" ;; 
-            1) run_cli_sync "$([ "$_strategy_selected" -eq 0 ] && echo "local" || echo "remote")" "$selected_repos" ;; 
-            2) run_cli_push "$selected_repos" ;; 
+            0) run_cli_sync "$([ "$_strategy_selected" -eq 0 ] && echo "local" || echo "remote")" "$selected_repos" ;;
+            1) run_cli_push "$selected_repos" ;;
+            2) run_cli_pull "$selected_repos" ;;
+            3) run_cli_status "$selected_repos" ;;
         esac
     fi
-    
-    printf "\n${C_GREEN}${C_BOLD}All tasks complete! Press any key to exit.${C_RESET}\n"
-    dd bs=1 count=1 >/dev/null 2>&1
+
+    printf "\n${C_GREEN}${C_BOLD}All tasks complete!${C_RESET}\n"
+    printf "${C_YELLOW}Press 'm' to return to menu or any other key to exit.${C_RESET}\n"
+
+    choice=$(dd bs=1 count=1 2>/dev/null)
+    if [ "$choice" = "m" ] || [ "$choice" = "M" ]; then
+        return 0  # Return to menu
+    else
+        return 1  # Exit
+    fi
 }
 
 run_interactive_mode() {
@@ -310,16 +372,36 @@ run_interactive_mode() {
             space)
                 case "$_current_field" in
                     0) _strategy_selected=$((1 - _strategy_selected)) ;;
-                    1) _action_selected=$(((_action_selected + 1) % 3)) ;;
+                    1) _action_selected=$(((_action_selected + 1) % 4)) ;;
                     2) # Toggle repo selection
                         current_char=$(echo "$_repo_selection" | cut -c $((_repo_cursor_index + 1)))
                         new_char=$([ "$current_char" = "y" ] && echo "n" || echo "y")
                         _repo_selection=$(echo "$_repo_selection" | sed "s/./$new_char/$((_repo_cursor_index + 1))")
                         ;;
-                    3) run_tui_action; break ;;
+                    3)
+                        run_tui_action
+                        if [ $? -eq 1 ]; then
+                            break
+                        else
+                            _save_term
+                            stty -icanon -echo
+                            _hide_cursor
+                        fi
+                        ;;
                 esac
-                ;; 
-            enter) [ "$_current_field" -eq 3 ] && { run_tui_action; break; };;
+                ;;
+            enter)
+                if [ "$_current_field" -eq 3 ]; then
+                    run_tui_action
+                    if [ $? -eq 1 ]; then
+                        break
+                    else
+                        _save_term
+                        stty -icanon -echo
+                        _hide_cursor
+                    fi
+                fi
+                ;;
             quit) break ;; 
         esac
     done
@@ -336,18 +418,20 @@ show_help() {
     printf "  ${C_GREEN}sync [local|remote]${C_RESET}\tBidirectional sync. Default: 'remote'.\n"
     printf "  ${C_GREEN}push${C_RESET}\t\t\tPushes committed changes.\n"
     printf "  ${C_GREEN}pull${C_RESET}\t\t\tPulls using 'remote' strategy.\n"
+    printf "  ${C_GREEN}status${C_RESET}\t\t\tChecks git status for all repos.\n"
     printf "  ${C_GREEN}help${C_RESET}\t\t\tShows this help message.\n\n"
 }
 
 # --- Main Entry Point ---
 main() {
     case "$1" in
-        sync) run_cli_sync "$2" ;; 
-        push) run_cli_push ;; 
-        pull) run_cli_pull ;; 
-        help|-h|--help) show_help ;; 
-        "") run_interactive_mode ;; 
-        *) _error "Invalid command: $1"; show_help; exit 1 ;; 
+        sync) run_cli_sync "$2" ;;
+        push) run_cli_push ;;
+        pull) run_cli_pull ;;
+        status) run_cli_status ;;
+        help|-h|--help) show_help ;;
+        "") run_interactive_mode ;;
+        *) _error "Invalid command: $1"; show_help; exit 1 ;;
     esac
 }
 
