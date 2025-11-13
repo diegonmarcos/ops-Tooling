@@ -1,616 +1,544 @@
 #!/usr/bin/env python3
+"""
+gcl.py - A Python git clone/pull/push manager with TUI and CLI modes.
+Converted from gcl.sh with identical functionality.
+"""
 
 import os
-import subprocess
 import sys
-import curses
+import subprocess
+import termios
+import tty
+from typing import List, Tuple, Optional
 
-# Repository definitions
-REPOSITORIES = {
-    'front-Github_profile': {
-        'https': 'https://github.com/diegonmarcos/diegonmarcos.git',
-        'ssh': 'git@github.com:diegonmarcos/diegonmarcos.git',
-        'public': True
-    },
-    'front-Github_io': {
-        'https': 'https://github.com/diegonmarcos/diegonmarcos.github.io.git',
-        'ssh': 'git@github.com:diegonmarcos/diegonmarcos.github.io.git',
-        'public': True
-    },
-    'back-Mylibs': {
-        'https': 'https://github.com/diegonmarcos/back-Mylibs.git',
-        'ssh': 'git@github.com:diegonmarcos/back-Mylibs.git',
-        'public': True
-    },
-    'back-System': {
-        'https': 'https://github.com/diegonmarcos/back-System.git',
-        'ssh': 'git@github.com:diegonmarcos/back-System.git',
-        'public': True
-    },
-    'back-Algo': {
-        'https': 'https://github.com/diegonmarcos/back-Algo.git',
-        'ssh': 'git@github.com:diegonmarcos/back-Algo.git',
-        'public': True
-    },
-    'back-Graphic': {
-        'https': 'https://github.com/diegonmarcos/back-Graphic.git',
-        'ssh': 'git@github.com:diegonmarcos/back-Graphic.git',
-        'public': True
-    },
-    'cyber-Cyberwarfare': {
-        'https': 'https://github.com/diegonmarcos/cyber-Cyberwarfare.git',
-        'ssh': 'git@github.com:diegonmarcos/cyber-Cyberwarfare.git',
-        'public': True
-    },
-    'ops-Tooling': {
-        'https': 'https://github.com/diegonmarcos/ops-Tooling.git',
-        'ssh': 'git@github.com:diegonmarcos/ops-Tooling.git',
-        'public': True
-    },
-    'ml-MachineLearning': {
-        'https': 'https://github.com/diegonmarcos/ml-MachineLearning.git',
-        'ssh': 'git@github.com:diegonmarcos/ml-MachineLearning.git',
-        'public': True
-    },
-    'ml-DataScience': {
-        'https': 'https://github.com/diegonmarcos/ml-DataScience.git',
-        'ssh': 'git@github.com:diegonmarcos/ml-DataScience.git',
-        'public': True
-    },
-    'ml-Agentic': {
-        'https': 'https://github.com/diegonmarcos/ml-Agentic.git',
-        'ssh': 'git@github.com:diegonmarcos/ml-Agentic.git',
-        'public': True
-    },
-    'front-Notes_md': {
-        'https': 'https://github.com/diegonmarcos/front-Notes_md.git',
-        'ssh': 'git@github.com:diegonmarcos/front-Notes_md.git',
-        'public': False
-    },
-    'z-lecole42': {
-        'https': 'https://github.com/diegonmarcos/lecole42.git',
-        'ssh': 'git@github.com:diegonmarcos/lecole42.git',
-        'public': False
-    },
-    'z-dev': {
-        'https': 'https://github.com/diegonmarcos/dev.git',
-        'ssh': 'git@github.com:diegonmarcos/dev.git',
-        'public': False
-    }
-}
+# --- Configuration: Repository Lists ---
+PUBLIC_REPOS = """
+front-Github_profile:git@github.com:diegonmarcos/diegonmarcos.git
+front-Github_io:git@github.com:diegonmarcos/diegonmarcos.github.io.git
+back-Mylibs:git@github.com:diegonmarcos/back-Mylibs.git
+back-System:git@github.com:diegonmarcos/back-System.git
+back-Algo:git@github.com:diegonmarcos/back-Algo.git
+back-Graphic:git@github.com:diegonmarcos/back-Graphic.git
+cyber-Cyberwarfare:git@github.com:diegonmarcos/cyber-Cyberwarfare.git
+ops-Tooling:git@github.com:diegonmarcos/ops-Tooling.git
+ml-MachineLearning:git@github.com:diegonmarcos/ml-MachineLearning.git
+ml-DataScience:git@github.com:diegonmarcos/ml-DataScience.git
+ml-Agentic:git@github.com:diegonmarcos/ml-Agentic.git
+"""
 
-# Color pair constants
-COLOR_HEADER = 1
-COLOR_TITLE = 2
-COLOR_HELP = 3
-COLOR_SELECTED = 4
-COLOR_HIGHLIGHT = 5
-COLOR_BUTTON = 6
-COLOR_DIVIDER = 7
-COLOR_CURRENT = 8
+PRIVATE_REPOS = """
+front-Notes_md:git@github.com:diegonmarcos/front-Notes_md.git
+z-lecole42:git@github.com:diegonmarcos/lecole42.git
+z-dev:git@github.com:diegonmarcos/dev.git
+"""
+
+ALL_REPOS = PUBLIC_REPOS + PRIVATE_REPOS
+
+# --- Color and Terminal Control ---
+class Colors:
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    CYAN = "\033[36m"
+    BG_BLUE = "\033[44m"
+    BG_GREEN = "\033[42m"
 
 
-class GitManager:
+class Terminal:
+    """Terminal control utilities"""
+
     def __init__(self):
-        self.mode_selected = 1  # 0=HTTPS, 1=SSH
-        self.strategy_selected = 1  # 0=LOCAL, 1=REMOTE
-        self.action_selected = 0  # 0=PULL, 1=SYNC (default PULL)
-        self.current_field = 0  # 0=mode, 1=strategy, 2=action, 3=run button
+        self.saved_settings = None
+
+    @staticmethod
+    def clear_screen():
+        print("\033[2J\033[H", end="", flush=True)
+
+    @staticmethod
+    def move_cursor(row: int, col: int):
+        print(f"\033[{row};{col}H", end="", flush=True)
+
+    @staticmethod
+    def hide_cursor():
+        print("\033[?25l", end="", flush=True)
+
+    @staticmethod
+    def show_cursor():
+        print("\033[?25h", end="", flush=True)
+
+    def save_term(self):
+        self.saved_settings = termios.tcgetattr(sys.stdin)
+
+    def restore_term(self):
+        if self.saved_settings:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.saved_settings)
+        self.show_cursor()
+
+    @staticmethod
+    def set_raw_mode():
+        tty.setraw(sys.stdin)
+
+
+# --- Helper Functions ---
+def log(message: str):
+    print(f"{Colors.CYAN}==>{Colors.RESET} {Colors.BOLD}{message}{Colors.RESET}")
+
+
+def success(message: str):
+    print(f"{Colors.GREEN}  ✓ {message}{Colors.RESET}")
+
+
+def error(message: str):
+    print(f"{Colors.RED}  ✗ {message}{Colors.RESET}")
+
+
+def warn(message: str):
+    print(f"{Colors.YELLOW}  ⚠ {message}{Colors.RESET}")
+
+
+def parse_repos(repo_string: str) -> List[Tuple[str, str]]:
+    """Parse repository configuration string into list of (name, url) tuples"""
+    repos = []
+    for line in repo_string.strip().split('\n'):
+        line = line.strip()
+        if line and ':' in line:
+            parts = line.split(':', 1)
+            if len(parts) == 2:
+                repos.append((parts[0], parts[1]))
+    return repos
+
+
+def get_repo_url(repo_name: str) -> Optional[str]:
+    """Get repository URL by name"""
+    for name, url in parse_repos(ALL_REPOS):
+        if name == repo_name:
+            return url
+    return None
+
+
+# --- Core Git Functions ---
+def process_repo(repo_dir: str, repo_url: str, strategy: str, action: str):
+    """Process a single repository with the given action"""
+    log(f"Processing '{repo_dir}'")
+
+    if not os.path.isdir(repo_dir):
+        log(f"Cloning '{repo_dir}'...")
+        result = subprocess.run(['git', 'clone', '-q', repo_url, repo_dir],
+                              capture_output=True)
+        if result.returncode == 0:
+            success("Clone complete.")
+        else:
+            error("Clone failed.")
+        print()
+        return
+
+    if action in ['sync', 'pull']:
+        print(f"  Pulling with strategy: {Colors.BOLD}{strategy}{Colors.RESET}")
+        result = subprocess.run(['git', '-C', repo_dir, 'pull', '-q',
+                               f'--strategy-option={strategy}'],
+                              capture_output=True)
+        if result.returncode == 0:
+            success("Pull complete.")
+            if action == 'sync':
+                print("  Pushing changes...")
+                result = subprocess.run(['git', '-C', repo_dir, 'push', '-q'],
+                                      capture_output=True)
+                if result.returncode == 0:
+                    success("Push complete.")
+                else:
+                    warn("Push failed (no changes or permissions issue).")
+        else:
+            error("Pull failed.")
+
+    elif action == 'push':
+        print("  Staging all changes...")
+        subprocess.run(['git', '-C', repo_dir, 'add', '.'])
+
+        # Check if there are staged changes
+        result = subprocess.run(['git', '-C', repo_dir, 'diff-index', '--quiet',
+                               '--cached', 'HEAD', '--'],
+                              capture_output=True)
+        if result.returncode != 0:  # There are changes
+            print("  Found changes, committing with default message 'fixes'...")
+            result = subprocess.run(['git', '-C', repo_dir, 'commit', '-q', '-m', 'fixes'],
+                                  capture_output=True)
+            if result.returncode == 0:
+                success("Commit complete.")
+            else:
+                error("Commit failed unexpectedly.")
+
+        print("  Pushing changes...")
+        result = subprocess.run(['git', '-C', repo_dir, 'push', '-q'],
+                              capture_output=True)
+        if result.returncode == 0:
+            success("Push complete.")
+        else:
+            warn("Push failed (no changes or permissions issue).")
+
+    print()
+
+
+def check_repo_status(repo_dir: str, repo_url: str):
+    """Check git status of a repository"""
+    if not os.path.isdir(repo_dir):
+        warn(f"'{repo_dir}' not cloned yet.")
+        print()
+        return
+
+    log(f"Checking '{repo_dir}'")
+
+    # Check for uncommitted changes
+    result = subprocess.run(['git', '-C', repo_dir, 'diff-index', '--quiet', 'HEAD', '--'],
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    if result.returncode != 0:
+        warn("Has uncommitted changes (staged or unstaged)")
+        print(f"  {Colors.YELLOW}Files changed:{Colors.RESET}")
+        result = subprocess.run(['git', '-C', repo_dir, 'status', '--short'],
+                              capture_output=True, text=True)
+        for line in result.stdout.strip().split('\n'):
+            if line:
+                print(f"    {line}")
+    else:
+        success("Working tree clean")
+
+    # Check for unpushed commits
+    result = subprocess.run(['git', '-C', repo_dir, 'rev-parse', '@{u}'],
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    if result.returncode == 0:
+        # Branch tracks a remote
+        result = subprocess.run(['git', '-C', repo_dir, 'log', '@{u}..', '--oneline'],
+                              capture_output=True, text=True)
+        commits = [l for l in result.stdout.strip().split('\n') if l]
+        unpushed = len(commits)
+        if unpushed > 0:
+            warn(f"Has {unpushed} unpushed commit(s)")
+            print(f"  {Colors.YELLOW}Unpushed commits:{Colors.RESET}")
+            for line in commits:
+                print(f"    {line}")
+        else:
+            success("All commits pushed")
+    else:
+        warn("Branch does not track a remote")
+
+    print()
+
+
+# --- CLI Actions ---
+def run_cli_sync(strategy: str = 'remote', repos_filter: Optional[List[str]] = None):
+    """Run bidirectional sync"""
+    git_strategy = 'theirs' if strategy == 'remote' else 'ours'
+    log(f"Starting Bidirectional Sync (Strategy: {git_strategy})")
+
+    repos = parse_repos(ALL_REPOS)
+    for repo_dir, repo_url in repos:
+        if repos_filter is None or repo_dir in repos_filter:
+            process_repo(repo_dir, repo_url, git_strategy, 'sync')
+
+
+def run_cli_push(repos_filter: Optional[List[str]] = None):
+    """Run push to all repositories"""
+    log("Starting Push")
+
+    repos = parse_repos(ALL_REPOS)
+    for repo_dir, repo_url in repos:
+        if repos_filter is None or repo_dir in repos_filter:
+            process_repo(repo_dir, repo_url, 'none', 'push')
+
+
+def run_cli_pull(repos_filter: Optional[List[str]] = None):
+    """Run forced pull (remote overwrites local)"""
+    log("Starting Forced Pull (Remote Overwrites Local on Conflict)")
+
+    repos = parse_repos(ALL_REPOS)
+    for repo_dir, repo_url in repos:
+        if repos_filter is None or repo_dir in repos_filter:
+            process_repo(repo_dir, repo_url, 'theirs', 'pull')
+
+
+def run_cli_status(repos_filter: Optional[List[str]] = None):
+    """Check git status for all repositories"""
+    log("Checking Git Status for Repositories")
+
+    repos = parse_repos(ALL_REPOS)
+    for repo_dir, repo_url in repos:
+        if repos_filter is None or repo_dir in repos_filter:
+            check_repo_status(repo_dir, repo_url)
+
+
+# --- TUI Functions ---
+class TUIState:
+    """State management for the TUI"""
+
+    def __init__(self):
+        self.strategy_selected = 1  # 0=LOCAL, 1=REMOTE (default)
+        self.action_selected = 0    # 0=SYNC, 1=PUSH, 2=PULL, 3=STATUS
+        self.repo_cursor_index = 0
+        self.current_field = 0
         self.total_fields = 4
 
-    def init_colors(self):
-        """Initialize color pairs."""
-        curses.init_pair(COLOR_HEADER, curses.COLOR_CYAN, curses.COLOR_BLACK)
-        curses.init_pair(COLOR_TITLE, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
-        curses.init_pair(COLOR_HELP, curses.COLOR_YELLOW, curses.COLOR_BLACK)
-        curses.init_pair(COLOR_SELECTED, curses.COLOR_GREEN, curses.COLOR_BLACK)
-        curses.init_pair(COLOR_HIGHLIGHT, curses.COLOR_WHITE, curses.COLOR_BLUE)
-        curses.init_pair(COLOR_BUTTON, curses.COLOR_GREEN, curses.COLOR_BLACK)
-        curses.init_pair(COLOR_DIVIDER, curses.COLOR_BLUE, curses.COLOR_BLACK)
-        curses.init_pair(COLOR_CURRENT, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+        # Parse repositories
+        self.repos = parse_repos(ALL_REPOS)
+        self.repo_count = len(self.repos)
+        self.repo_selection = [True] * self.repo_count  # All selected by default
 
-    def draw_interface(self, stdscr):
-        """Draw the complete interface."""
-        stdscr.clear()
-        max_y, max_x = stdscr.getmaxyx()
-
-        # Check minimum terminal size
-        if max_y < 30 or max_x < 80:
-            stdscr.addstr(0, 0, "Terminal too small!")
-            stdscr.addstr(1, 0, f"Minimum: 30 rows x 80 cols")
-            stdscr.addstr(2, 0, f"Current: {max_y} rows x {max_x} cols")
-            stdscr.addstr(4, 0, "Please resize and press any key...")
-            stdscr.refresh()
-            stdscr.getch()
-            return
-
-        line = 0
-
-        # Header
-        header = "╔══════════════════════════════════════════════════════════════════════╗"
-        title = "║       Git Clone/Pull Manager - Diego's Repositories                 ║"
-        footer_line = "╚══════════════════════════════════════════════════════════════════════╝"
-
-        if line < max_y - 1:
-            stdscr.addstr(line, 0, header, curses.color_pair(COLOR_HEADER) | curses.A_BOLD)
-        line += 1
-        if line < max_y - 1:
-            stdscr.addstr(line, 0, title, curses.color_pair(COLOR_HEADER) | curses.A_BOLD)
-        line += 1
-        if line < max_y - 1:
-            stdscr.addstr(line, 0, footer_line, curses.color_pair(COLOR_HEADER) | curses.A_BOLD)
-        line += 2
-
-        # Help text (compact)
-        if line < max_y - 1:
-            stdscr.addstr(line, 2, "↑↓:", curses.color_pair(COLOR_HELP))
-            stdscr.addstr("Navigate ", curses.A_NORMAL)
-            stdscr.addstr("SPACE:", curses.color_pair(COLOR_HELP))
-            stdscr.addstr("Toggle ", curses.A_NORMAL)
-            stdscr.addstr("ENTER:", curses.color_pair(COLOR_HELP))
-            stdscr.addstr("Execute ", curses.A_NORMAL)
-            stdscr.addstr("q:", curses.color_pair(COLOR_HELP))
-            stdscr.addstr("Quit", curses.A_NORMAL)
-        line += 2
-
-        # Divider
-        if line < max_y - 1:
-            stdscr.addstr(line, 0, "─" * 72, curses.color_pair(COLOR_DIVIDER))
-        line += 1
-
-        # MODE SELECTION
-        if line < max_y - 1:
-            stdscr.addstr(line, 2, "MODE: ", curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-            stdscr.addstr("Choose authentication method", curses.A_NORMAL)
-        line += 1
-
-        # HTTPS option
-        if self.current_field == 0:
-            attr = curses.color_pair(COLOR_HIGHLIGHT) | curses.A_BOLD
-        else:
-            attr = curses.A_NORMAL
-
-        if line < max_y - 1:
-            stdscr.addstr(line, 4, " ", attr)
-            if self.mode_selected == 0:
-                stdscr.addstr("● ", curses.color_pair(COLOR_SELECTED) | curses.A_BOLD | attr)
-            else:
-                stdscr.addstr("○ ", attr)
-            stdscr.addstr("HTTPS ", attr)
-            stdscr.addstr("  - Public repositories only (11 repos)", curses.A_NORMAL)
-        line += 1
-
-        # SSH option
-        if self.current_field == 0:
-            attr = curses.color_pair(COLOR_HIGHLIGHT) | curses.A_BOLD
-        else:
-            attr = curses.A_NORMAL
-
-        if line < max_y - 1:
-            stdscr.addstr(line, 4, " ", attr)
-            if self.mode_selected == 1:
-                stdscr.addstr("● ", curses.color_pair(COLOR_SELECTED) | curses.A_BOLD | attr)
-            else:
-                stdscr.addstr("○ ", attr)
-            stdscr.addstr("SSH   ", attr)
-            stdscr.addstr("  - All repositories including private (14 repos)", curses.A_NORMAL)
-        line += 2
-
-        # Divider
-        if line < max_y - 1:
-            stdscr.addstr(line, 0, "─" * 72, curses.color_pair(COLOR_DIVIDER))
-        line += 1
-
-        # MERGE STRATEGY
-        if line < max_y - 1:
-            stdscr.addstr(line, 2, "STRATEGY: ", curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-            stdscr.addstr("How to handle conflicts", curses.A_NORMAL)
-        line += 1
-
-        # LOCAL option
-        if self.current_field == 1:
-            attr = curses.color_pair(COLOR_HIGHLIGHT) | curses.A_BOLD
-        else:
-            attr = curses.A_NORMAL
-
-        if line < max_y - 1:
-            stdscr.addstr(line, 4, " ", attr)
-            if self.strategy_selected == 0:
-                stdscr.addstr("● ", curses.color_pair(COLOR_SELECTED) | curses.A_BOLD | attr)
-            else:
-                stdscr.addstr("○ ", attr)
-            stdscr.addstr("LOCAL  ", attr)
-            stdscr.addstr(" - Keep your local changes on conflicts (merge -X ours)", curses.A_NORMAL)
-        line += 1
-
-        # REMOTE option
-        if self.current_field == 1:
-            attr = curses.color_pair(COLOR_HIGHLIGHT) | curses.A_BOLD
-        else:
-            attr = curses.A_NORMAL
-
-        if line < max_y - 1:
-            stdscr.addstr(line, 4, " ", attr)
-            if self.strategy_selected == 1:
-                stdscr.addstr("● ", curses.color_pair(COLOR_SELECTED) | curses.A_BOLD | attr)
-            else:
-                stdscr.addstr("○ ", attr)
-            stdscr.addstr("REMOTE ", attr)
-            stdscr.addstr(" - Keep remote changes (merge -X theirs) ", curses.A_NORMAL)
-            stdscr.addstr("[recommended]", curses.color_pair(COLOR_HELP))
-        line += 2
-
-        # Divider
-        if line < max_y - 1:
-            stdscr.addstr(line, 0, "─" * 72, curses.color_pair(COLOR_DIVIDER))
-        line += 1
-
-        # SYNC ACTION
-        if line < max_y - 1:
-            stdscr.addstr(line, 2, "ACTION: ", curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-            stdscr.addstr("Choose sync direction", curses.A_NORMAL)
-        line += 1
-
-        # PULL option
-        if self.current_field == 2:
-            attr = curses.color_pair(COLOR_HIGHLIGHT) | curses.A_BOLD
-        else:
-            attr = curses.A_NORMAL
-
-        if line < max_y - 1:
-            stdscr.addstr(line, 4, " ", attr)
-            if self.action_selected == 0:
-                stdscr.addstr("● ", curses.color_pair(COLOR_SELECTED) | curses.A_BOLD | attr)
-            else:
-                stdscr.addstr("○ ", attr)
-            stdscr.addstr("PULL   ", attr)
-            stdscr.addstr(" - Only pull from remote (one-way: remote → local)", curses.A_NORMAL)
-        line += 1
-
-        # SYNC option
-        if self.current_field == 2:
-            attr = curses.color_pair(COLOR_HIGHLIGHT) | curses.A_BOLD
-        else:
-            attr = curses.A_NORMAL
-
-        if line < max_y - 1:
-            stdscr.addstr(line, 4, " ", attr)
-            if self.action_selected == 1:
-                stdscr.addstr("● ", curses.color_pair(COLOR_SELECTED) | curses.A_BOLD | attr)
-            else:
-                stdscr.addstr("○ ", attr)
-            stdscr.addstr("SYNC   ", attr)
-            stdscr.addstr(" - Bidirectional sync (pull then push) ", curses.A_NORMAL)
-            stdscr.addstr("[⚠ pushes changes]", curses.color_pair(COLOR_HELP))
-        line += 2
-
-        # Divider
-        if line < max_y - 1:
-            stdscr.addstr(line, 0, "─" * 72, curses.color_pair(COLOR_DIVIDER))
-        line += 1
-
-        # RUN button
-        button_text = "              [ ▶ RUN SYNC ]                    "
-        if self.current_field == 3:
-            attr = curses.color_pair(COLOR_SELECTED) | curses.A_REVERSE | curses.A_BOLD
-        else:
-            attr = curses.color_pair(COLOR_BUTTON) | curses.A_BOLD
-
-        if line < max_y - 1:
-            stdscr.addstr(line, 10, button_text, attr)
-        line += 2
-
-        # Current selection
-        if line < max_y - 1:
-            stdscr.addstr(line, 2, "Selection: ", curses.color_pair(COLOR_HEADER) | curses.A_BOLD)
-            mode_text = "HTTPS" if self.mode_selected == 0 else "SSH"
-            strategy_text = "LOCAL" if self.strategy_selected == 0 else "REMOTE"
-            action_text = "PULL" if self.action_selected == 0 else "SYNC"
-            stdscr.addstr(mode_text, curses.color_pair(COLOR_CURRENT) | curses.A_BOLD)
-            stdscr.addstr(" + ", curses.A_NORMAL)
-            stdscr.addstr(strategy_text, curses.color_pair(COLOR_CURRENT) | curses.A_BOLD)
-            stdscr.addstr(" + ", curses.A_NORMAL)
-            stdscr.addstr(action_text, curses.color_pair(COLOR_CURRENT) | curses.A_BOLD)
-
-        stdscr.refresh()
-
-    def handle_key(self, key):
-        """Handle keyboard input."""
-        if key == curses.KEY_UP:
-            self.current_field = (self.current_field - 1) % self.total_fields
-        elif key == curses.KEY_DOWN:
-            self.current_field = (self.current_field + 1) % self.total_fields
-        elif key in (ord(' '), ord('\t')):
-            self.toggle_selection()
-        elif key == ord('\n'):  # Enter
-            if self.current_field == 3:
-                return 'execute'
-            else:
-                self.toggle_selection()
-        elif key in (ord('q'), ord('Q')):
-            return 'quit'
-        return None
-
-    def toggle_selection(self):
-        """Toggle the current selection."""
-        if self.current_field == 0:
-            self.mode_selected = 1 - self.mode_selected
-        elif self.current_field == 1:
-            self.strategy_selected = 1 - self.strategy_selected
-        elif self.current_field == 2:
-            self.action_selected = 1 - self.action_selected
-
-    def clone_or_pull(self, repo_name, url, merge_strategy, do_push=False):
-        """Clone a repository if it doesn't exist, or pull if it does."""
-        if os.path.isdir(repo_name):
-            print(f"\033[96mPulling \033[1m{repo_name}\033[0m\033[96m (keeping {merge_strategy} version on conflicts)...")
-            try:
-                subprocess.run(
-                    ['git', '-C', repo_name, 'pull', '-s', 'recursive', '-X', merge_strategy],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-                print(f"\033[92m  ✓ Pull Success\033[0m")
-
-                # Push if sync mode enabled
-                if do_push:
-                    print(f"\033[96m  Pushing changes to remote...")
-                    try:
-                        subprocess.run(
-                            ['git', '-C', repo_name, 'push'],
-                            capture_output=True,
-                            text=True,
-                            check=True
-                        )
-                        print(f"\033[92m  ✓ Push Success\033[0m")
-                    except subprocess.CalledProcessError:
-                        print(f"\033[93m  ⚠ Push Failed (no changes or permission denied)\033[0m")
-
-                return True
-            except subprocess.CalledProcessError:
-                print(f"\033[91m  ✗ Pull Failed\033[0m")
-                return False
-        else:
-            print(f"\033[96mCloning \033[1m{repo_name}\033[0m\033[96m...")
-            try:
-                subprocess.run(
-                    ['git', 'clone', url, repo_name],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-                print(f"\033[92m  ✓ Clone Success\033[0m")
-                return True
-            except subprocess.CalledProcessError:
-                print(f"\033[91m  ✗ Clone Failed\033[0m")
-                return False
-
-    def process_repositories(self):
-        """Process all repositories based on current selections."""
-        # Exit curses mode
-        curses.endwin()
-
-        # Clear screen
-        os.system('clear')
-
-        # Determine settings
-        url_type = 'https' if self.mode_selected == 0 else 'ssh'
-        merge_strategy = 'ours' if self.strategy_selected == 0 else 'theirs'
-        strategy_name = 'LOCAL' if self.strategy_selected == 0 else 'REMOTE'
-        mode_name = 'HTTPS (Public only)' if self.mode_selected == 0 else 'SSH (All repos)'
-        action_name = 'PULL ONLY' if self.action_selected == 0 else 'BIDIRECTIONAL SYNC (Pull + Push)'
-        do_push = self.action_selected == 1
-
-        # Print header
-        print("\033[1m\033[96m╔══════════════════════════════════════════════════════════════════════╗\033[0m")
-        print("\033[1m\033[96m║       Processing Repositories                                        ║\033[0m")
-        print("\033[1m\033[96m╚══════════════════════════════════════════════════════════════════════╝\033[0m")
-        print()
-        print(f"\033[93mMode: \033[0m\033[1m{mode_name}\033[0m")
-        print(f"\033[93mStrategy: \033[0m\033[1mKeep {strategy_name} changes on conflicts\033[0m")
-        print(f"\033[93mAction: \033[0m\033[1m{action_name}\033[0m")
-        print("\033[94m════════════════════════════════════════════════════════════════════════\033[0m")
-        print()
-
-        success_count = 0
-        fail_count = 0
-
-        for repo_name, repo_info in REPOSITORIES.items():
-            # Skip private repos in HTTPS mode
-            if self.mode_selected == 0 and not repo_info['public']:
-                continue
-
-            url = repo_info[url_type]
-            if self.clone_or_pull(repo_name, url, merge_strategy, do_push):
-                success_count += 1
-            else:
-                fail_count += 1
-            print()
-
-        print("\033[94m════════════════════════════════════════════════════════════════════════\033[0m")
-        print("\033[1m\033[92mProcessing complete!\033[0m")
-        print("\033[94m════════════════════════════════════════════════════════════════════════\033[0m")
-        print()
-
-    def run(self, stdscr):
-        """Main loop."""
-        curses.curs_set(0)  # Hide cursor
-        self.init_colors()
-
-        while True:
-            self.draw_interface(stdscr)
-            key = stdscr.getch()
-            action = self.handle_key(key)
-
-            if action == 'quit':
-                break
-            elif action == 'execute':
-                self.process_repositories()
-                print("\nPress Enter to continue...")
-                input()
-                # Reinitialize curses
-                stdscr.clear()
-                stdscr.refresh()
+    def get_selected_repos(self) -> List[str]:
+        """Get list of selected repository names"""
+        return [self.repos[i][0] for i in range(self.repo_count)
+                if self.repo_selection[i]]
 
 
-def show_usage():
-    """Show usage information."""
+def read_key() -> str:
+    """Read a single key press and return its meaning"""
+    char = sys.stdin.read(1)
+
+    if char == '\033':  # Escape sequence
+        next_chars = sys.stdin.read(2)
+        if next_chars == '[A':
+            return 'up'
+        elif next_chars == '[B':
+            return 'down'
+    elif char in ['\n', '\r']:
+        return 'enter'
+    elif char == ' ':
+        return 'space'
+    elif char == '\t':
+        return 'tab'
+    elif char.lower() == 'a':
+        return 'selectall'
+    elif char.lower() == 'u':
+        return 'unselectall'
+    elif char.lower() == 'q':
+        return 'quit'
+
+    return ''
+
+
+def draw_interface(state: TUIState):
+    """Draw the TUI interface"""
+    Terminal.clear_screen()
+    line = 1
+
     # Header
-    print("\033[1m\033[96m╔══════════════════════════════════════════════════════════════════════╗\033[0m")
-    print("\033[1m\033[96m║       Git Clone/Pull Manager - Help                                 ║\033[0m")
-    print("\033[1m\033[96m╚══════════════════════════════════════════════════════════════════════╝\033[0m")
-    print()
+    Terminal.move_cursor(line, 1)
+    print(f"{Colors.BOLD}{Colors.CYAN}╔══════════════════════════════════════════════════════════════════════╗", end="")
+    line += 1
+    Terminal.move_cursor(line, 1)
+    print(f"║                  gcl.py - Git Sync Manager                     ║", end="")
+    line += 1
+    Terminal.move_cursor(line, 1)
+    print(f"╚══════════════════════════════════════════════════════════════════════╝{Colors.RESET}", end="")
+    line += 1
 
-    # Usage
-    print("\033[1m\033[93mUSAGE:\033[0m")
-    print("  gcl.py \033[96m[MODE] [STRATEGY] [ACTION]\033[0m")
-    print()
+    # Help text
+    Terminal.move_cursor(line, 3)
+    print(f"{Colors.YELLOW}Navigate: ↑/↓  Switch: TAB  Toggle: SPACE  Run: ENTER  Quit: q{Colors.RESET}", end="")
+    line += 1
+    Terminal.move_cursor(line, 3)
+    print(f"{Colors.YELLOW}Select All: a  Unselect All: u{Colors.RESET}", end="")
+    line += 2
 
-    # Description
-    print("\033[97mGit Clone/Pull Manager - Manage multiple GitHub repositories\033[0m")
-    print()
+    # Strategy Selection
+    Terminal.move_cursor(line, 3)
+    print(f"{Colors.BOLD}{Colors.BLUE}MERGE STRATEGY (On Conflict):{Colors.RESET}", end="")
+    line += 1
 
-    # Arguments
-    print("\033[1m\033[93mARGUMENTS:\033[0m")
-    print("  \033[96mMODE       \033[0mAuthentication mode: \033[92m'https'\033[0m or \033[92m'ssh'\033[0m")
-    print("  \033[96mSTRATEGY   \033[0mMerge strategy: \033[92m'local'\033[0m or \033[92m'remote'\033[0m\033[97m (default: remote)\033[0m")
-    print("  \033[96mACTION     \033[0mSync action: \033[92m'pull'\033[0m or \033[92m'sync'\033[0m\033[97m (default: pull)\033[0m")
-    print()
+    Terminal.move_cursor(line, 5)
+    bg = Colors.BG_BLUE if state.current_field == 0 else ""
+    marker = "●" if state.strategy_selected == 0 else " "
+    print(f"{bg}[{marker}] LOCAL  (Keep local changes){Colors.RESET}", end="")
+    line += 1
 
-    # Examples
-    print("\033[1m\033[93mEXAMPLES:\033[0m")
-    print("  \033[95m# Interactive TUI mode (menu interface)\033[0m")
-    print("  \033[1m\033[92mgcl.py\033[0m")
-    print()
-    print("  \033[95m# CLI: SSH with remote strategy, pull only\033[0m")
-    print("  \033[1m\033[92mgcl.py ssh remote pull\033[0m")
-    print()
-    print("  \033[95m# CLI: SSH with remote strategy, bidirectional sync\033[0m")
-    print("  \033[1m\033[92mgcl.py ssh remote sync\033[0m")
-    print()
-    print("  \033[95m# CLI: HTTPS with local strategy, pull only (uses defaults)\033[0m")
-    print("  \033[1m\033[92mgcl.py https local\033[0m")
-    print()
-    print("  \033[95m# CLI: SSH with defaults (remote strategy, pull only)\033[0m")
-    print("  \033[1m\033[92mgcl.py ssh\033[0m")
-    print()
+    Terminal.move_cursor(line, 5)
+    bg = Colors.BG_BLUE if state.current_field == 0 else ""
+    marker = "●" if state.strategy_selected == 1 else " "
+    print(f"{bg}[{marker}] REMOTE (Overwrite with remote){Colors.RESET}", end="")
+    line += 2
 
-    # Modes
-    print("\033[1m\033[93mMODES:\033[0m")
-    print("  \033[92mhttps  \033[0m- Use HTTPS URLs (public repositories only - 11 repos)")
-    print("  \033[92mssh    \033[0m- Use SSH URLs (all repositories including private - 14 repos)")
-    print()
+    # Action Selection
+    Terminal.move_cursor(line, 3)
+    print(f"{Colors.BOLD}{Colors.BLUE}ACTION:{Colors.RESET}", end="")
+    line += 1
 
-    # Strategies
-    print("\033[1m\033[93mSTRATEGIES:\033[0m")
-    print("  \033[92mlocal   \033[0m- Keep local changes on conflicts (merge -X ours)")
-    print("  \033[92mremote  \033[0m- Keep remote changes on conflicts (merge -X theirs) \033[93m[recommended]\033[0m")
-    print()
+    actions = [
+        (0, "SYNC   (Remote <-> Local)"),
+        (1, "PUSH   (Local -> Remote)"),
+        (2, "PULL   (Remote -> Local)"),
+        (3, "STATUS (Check repos)")
+    ]
 
-    # Actions
-    print("\033[1m\033[93mACTIONS:\033[0m")
-    print("  \033[92mpull    \033[0m- Only pull from remote (one-way: remote → local)")
-    print("  \033[92msync    \033[0m- Bidirectional sync (pull then push) \033[93m[⚠ pushes local commits]\033[0m")
-    print()
+    for idx, label in actions:
+        Terminal.move_cursor(line, 5)
+        bg = Colors.BG_BLUE if state.current_field == 1 else ""
+        marker = "●" if state.action_selected == idx else " "
+        print(f"{bg}[{marker}] {label}{Colors.RESET}", end="")
+        line += 1
 
-    # Footer
-    print("\033[94m════════════════════════════════════════════════════════════════════════\033[0m")
+    line += 1
+
+    # Repository Selection
+    Terminal.move_cursor(line, 3)
+    print(f"{Colors.BOLD}{Colors.BLUE}REPOSITORIES (Toggle with SPACE):{Colors.RESET}", end="")
+    line += 1
+
+    for i, (repo_name, _) in enumerate(state.repos):
+        Terminal.move_cursor(line, 5)
+        bg = Colors.BG_BLUE if state.current_field == 2 and i == state.repo_cursor_index else ""
+        marker = "✓" if state.repo_selection[i] else " "
+        print(f"{bg}[{marker}] {repo_name}{Colors.RESET}", end="")
+        line += 1
+
+    line += 1
+
+    # Execute Button
+    Terminal.move_cursor(line, 3)
+    bg = Colors.BG_GREEN if state.current_field == 3 else ""
+    print(f"{bg}{Colors.BOLD}  [ RUN ]  {Colors.RESET}", end="")
+
+    sys.stdout.flush()
+
+
+def run_tui_action(state: TUIState, term: Terminal) -> bool:
+    """Execute the selected action. Returns True to return to menu, False to exit"""
+    term.restore_term()
+    Terminal.clear_screen()
+
+    selected_repos = state.get_selected_repos()
+
+    if not selected_repos:
+        warn("No repositories selected. Nothing to do.")
+    else:
+        strategy = 'local' if state.strategy_selected == 0 else 'remote'
+
+        if state.action_selected == 0:
+            run_cli_sync(strategy, selected_repos)
+        elif state.action_selected == 1:
+            run_cli_push(selected_repos)
+        elif state.action_selected == 2:
+            run_cli_pull(selected_repos)
+        elif state.action_selected == 3:
+            run_cli_status(selected_repos)
+
+    print(f"\n{Colors.GREEN}{Colors.BOLD}All tasks complete!{Colors.RESET}")
+    print(f"{Colors.YELLOW}Press 'm' to return to menu or any other key to exit.{Colors.RESET}")
+
+    # Read a single character
+    choice = sys.stdin.read(1)
+
+    return choice.lower() == 'm'
+
+
+def run_interactive_mode():
+    """Run the interactive TUI mode"""
+    state = TUIState()
+    term = Terminal()
+
+    term.save_term()
+    term.set_raw_mode()
+    Terminal.hide_cursor()
+
+    return_to_menu = False
+
+    try:
+        while True:
+            draw_interface(state)
+            key = read_key()
+
+            if key == 'up':
+                if state.current_field == 2:  # In repo list
+                    state.repo_cursor_index = (state.repo_cursor_index - 1) % state.repo_count
+                else:
+                    state.current_field = (state.current_field - 1) % state.total_fields
+
+            elif key == 'down':
+                if state.current_field == 2:  # In repo list
+                    state.repo_cursor_index = (state.repo_cursor_index + 1) % state.repo_count
+                else:
+                    state.current_field = (state.current_field + 1) % state.total_fields
+
+            elif key == 'tab':
+                state.current_field = (state.current_field + 1) % state.total_fields
+
+            elif key == 'selectall':
+                state.repo_selection = [True] * state.repo_count
+
+            elif key == 'unselectall':
+                state.repo_selection = [False] * state.repo_count
+
+            elif key == 'space':
+                if state.current_field == 0:
+                    state.strategy_selected = 1 - state.strategy_selected
+                elif state.current_field == 1:
+                    state.action_selected = (state.action_selected + 1) % 4
+                elif state.current_field == 2:
+                    idx = state.repo_cursor_index
+                    state.repo_selection[idx] = not state.repo_selection[idx]
+                elif state.current_field == 3:
+                    return_to_menu = run_tui_action(state, term)
+                    break
+
+            elif key == 'enter':
+                if state.current_field == 3:
+                    return_to_menu = run_tui_action(state, term)
+                    break
+
+            elif key == 'quit':
+                break
+
+    finally:
+        term.restore_term()
+
+    # If user wants to return to menu, restart
+    if return_to_menu:
+        run_interactive_mode()
+
+
+# --- Main Entry Point ---
+def show_help():
+    """Show help message"""
+    print(f"{Colors.BOLD}{Colors.CYAN}gcl.py - Git Clone/Pull/Push Manager{Colors.RESET}\n")
+    print("Manages multiple git repositories via a TUI or command-line arguments.\n")
+    print(f"{Colors.BOLD}{Colors.YELLOW}USAGE:{Colors.RESET}")
+    print(f"  {Colors.BOLD}gcl.py{Colors.RESET} [command] [options]\n")
+    print(f"{Colors.BOLD}{Colors.YELLOW}COMMANDS:{Colors.RESET}")
+    print("  (no command)\t\tLaunches the interactive TUI menu.")
+    print(f"  {Colors.GREEN}sync [local|remote]{Colors.RESET}\tBidirectional sync. Default: 'remote'.")
+    print(f"  {Colors.GREEN}push{Colors.RESET}\t\t\tPushes committed changes.")
+    print(f"  {Colors.GREEN}pull{Colors.RESET}\t\t\tPulls using 'remote' strategy.")
+    print(f"  {Colors.GREEN}status{Colors.RESET}\t\t\tChecks git status for all repos.")
+    print(f"  {Colors.GREEN}help{Colors.RESET}\t\t\tShows this help message.\n")
 
 
 def main():
-    """Entry point."""
-    manager = GitManager()
-
-    # Check for help flag
-    if len(sys.argv) > 1 and sys.argv[1] in ('-h', '--help', 'help'):
-        show_usage()
-        sys.exit(0)
-
-    # Check if arguments provided (CLI mode) or no arguments (interactive mode)
-    if len(sys.argv) > 1:
-        # Command-line mode with positional arguments
-        mode_arg = sys.argv[1]
-        strategy_arg = sys.argv[2] if len(sys.argv) > 2 else 'remote'
-        action_arg = sys.argv[3] if len(sys.argv) > 3 else 'pull'
-
-        # Validate mode
-        if mode_arg.lower() not in ['https', 'ssh']:
-            print(f"Error: Invalid mode '{mode_arg}'. Use 'https' or 'ssh'.")
-            show_usage()
-            sys.exit(1)
-
-        # Validate strategy
-        if strategy_arg.lower() not in ['local', 'remote']:
-            print(f"Error: Invalid strategy '{strategy_arg}'. Use 'local' or 'remote'.")
-            show_usage()
-            sys.exit(1)
-
-        # Validate action
-        if action_arg.lower() not in ['pull', 'sync']:
-            print(f"Error: Invalid action '{action_arg}'. Use 'pull' or 'sync'.")
-            show_usage()
-            sys.exit(1)
-
-        print("\033[1m\033[96m╔══════════════════════════════════════════════════════════════════════╗\033[0m")
-        print("\033[1m\033[96m║       Git Clone/Pull Manager - Diego's Repositories                 ║\033[0m")
-        print("\033[1m\033[96m╚══════════════════════════════════════════════════════════════════════╝\033[0m")
-        print()
-
-        # Set mode, strategy, and action
-        manager.mode_selected = 0 if mode_arg.lower() == 'https' else 1
-        manager.strategy_selected = 0 if strategy_arg.lower() == 'local' else 1
-        manager.action_selected = 0 if action_arg.lower() == 'pull' else 1
-
-        # Display settings
-        mode_name = 'HTTPS (Public only)' if manager.mode_selected == 0 else 'SSH (All repos)'
-        strategy_name = 'LOCAL' if manager.strategy_selected == 0 else 'REMOTE'
-        action_name = 'PULL ONLY' if manager.action_selected == 0 else 'BIDIRECTIONAL SYNC (Pull + Push)'
-
-        print(f"\033[93mMode: \033[0m\033[1m{mode_name}\033[0m")
-        print(f"\033[93mStrategy: \033[0m\033[1mKeep {strategy_name} changes on conflicts\033[0m")
-        print(f"\033[93mAction: \033[0m\033[1m{action_name}\033[0m")
-        print("\033[94m════════════════════════════════════════════════════════════════════════\033[0m")
-        print()
-
-        # Process repositories
-        success_count = 0
-        fail_count = 0
-
-        url_type = 'https' if manager.mode_selected == 0 else 'ssh'
-        merge_strategy = 'ours' if manager.strategy_selected == 0 else 'theirs'
-        do_push = manager.action_selected == 1
-
-        for repo_name, repo_info in REPOSITORIES.items():
-            # Skip private repos in HTTPS mode
-            if manager.mode_selected == 0 and not repo_info['public']:
-                continue
-
-            url = repo_info[url_type]
-            if manager.clone_or_pull(repo_name, url, merge_strategy, do_push):
-                success_count += 1
-            else:
-                fail_count += 1
-            print()
-
-        print("\033[94m════════════════════════════════════════════════════════════════════════\033[0m")
-        print(f"\033[1m\033[92mComplete! Success: {success_count} | Failed: {fail_count}\033[0m")
-        print("\033[94m════════════════════════════════════════════════════════════════════════\033[0m")
-
-    else:
-        # Interactive TUI mode
+    """Main entry point"""
+    if len(sys.argv) == 1:
+        # No arguments - run interactive mode
         try:
-            curses.wrapper(manager.run)
-            print("Goodbye!")
+            run_interactive_mode()
         except KeyboardInterrupt:
-            print("\n\nInterrupted by user. Exiting...")
+            print("\n\nExiting...")
             sys.exit(0)
-        except curses.error as e:
-            # This can happen if the terminal is resized too small
-            print(f"An error occurred: {e}")
-            print("Please ensure your terminal is large enough and try again.")
+    else:
+        command = sys.argv[1]
+
+        if command == 'sync':
+            strategy = sys.argv[2] if len(sys.argv) > 2 else 'remote'
+            run_cli_sync(strategy)
+        elif command == 'push':
+            run_cli_push()
+        elif command == 'pull':
+            run_cli_pull()
+        elif command == 'status':
+            run_cli_status()
+        elif command in ['help', '-h', '--help']:
+            show_help()
+        else:
+            error(f"Invalid command: {command}")
+            show_help()
             sys.exit(1)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
