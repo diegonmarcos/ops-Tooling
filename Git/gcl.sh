@@ -319,9 +319,11 @@ EOF
     printf "\n${C_GREEN}${C_BOLD}All tasks complete!${C_RESET}\n"
     printf "${C_YELLOW}Press 'm' to return to menu or any other key to exit.${C_RESET}\n"
 
+    # Read a single character
     choice=$(dd bs=1 count=1 2>/dev/null)
+
     if [ "$choice" = "m" ] || [ "$choice" = "M" ]; then
-        return 0  # Return to menu
+        return 0  # Return to menu (will restart TUI)
     else
         return 1  # Exit
     fi
@@ -333,10 +335,17 @@ run_interactive_mode() {
     _repo_list=$(printf "%s" "$ALL_REPOS" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | cut -d: -f1 | sed '/^$/d')
     _repo_count=$(echo "$_repo_list" | wc -l)
     # Initialize all repos to be selected ('y')
+    _repo_selection=""
     i=1; while [ "$i" -le "$_repo_count" ]; do _repo_selection="${_repo_selection}y"; i=$((i+1)); done
+
+    # Reset cursor positions
+    _repo_cursor_index=0
+    _current_field=0
 
     trap '_restore_term' EXIT INT TERM; _save_term
     stty -icanon -echo; _hide_cursor
+
+    _return_to_menu=0
 
     while true; do
         draw_interface
@@ -380,32 +389,31 @@ run_interactive_mode() {
                         ;;
                     3)
                         run_tui_action
-                        if [ $? -eq 1 ]; then
-                            break
-                        else
-                            _save_term
-                            stty -icanon -echo
-                            _hide_cursor
+                        if [ $? -eq 0 ]; then
+                            _return_to_menu=1
                         fi
+                        break
                         ;;
                 esac
                 ;;
             enter)
                 if [ "$_current_field" -eq 3 ]; then
                     run_tui_action
-                    if [ $? -eq 1 ]; then
-                        break
-                    else
-                        _save_term
-                        stty -icanon -echo
-                        _hide_cursor
+                    if [ $? -eq 0 ]; then
+                        _return_to_menu=1
                     fi
+                    break
                 fi
                 ;;
-            quit) break ;; 
+            quit) break ;;
         esac
     done
     _restore_term
+
+    # If user wants to return to menu, restart interactive mode
+    if [ "$_return_to_menu" -eq 1 ]; then
+        run_interactive_mode
+    fi
 }
 
 show_help() {
