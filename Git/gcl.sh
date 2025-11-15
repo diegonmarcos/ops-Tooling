@@ -1,7 +1,11 @@
 #!/bin/sh
 
 # gcl.sh - A simple, POSIX-compliant git clone/pull/push manager with TUI and CLI modes.
-# MODIFIED: Added TUI-based repo status panel on the right.
+# MODIFIED:
+# - Added TUI-based repo status panel on the right.
+# - Added 'r' key to refresh status panel.
+# - Added 's' key to select only "not OK" repos.
+# - FIXED: 's' key was selecting all repos.
 
 # --- Configuration: Repository Lists ---
 PUBLIC_REPOS="
@@ -55,7 +59,7 @@ _warn() { printf "${C_YELLOW}  ⚠ %s${C_RESET}\n" "$1"; }
 
 # --- Core Git Functions ---
 
-# NEW FUNCTION: Silently checks the status of a single repo for the TUI
+# Silently checks the status of a single repo for the TUI
 # @param $1: Repository directory name
 _get_repo_status() {
     repo_dir="$1"
@@ -245,6 +249,10 @@ _read_key() {
         key="selectall"
     elif [ "$char" = "u" ]; then
         key="unselectall"
+    elif [ "$char" = "s" ]; then # NEW
+        key="selectnotok"
+    elif [ "$char" = "r" ]; then # NEW
+        key="refresh"
     elif [ "$char" = "q" ]; then
         key="quit"
     fi
@@ -257,7 +265,8 @@ draw_interface() {
     printf "║                  gcl.sh - Git Sync Manager                     ║\n"
     printf "╚══════════════════════════════════════════════════════════════════════╝${C_RESET}\n"
     printf "  ${C_YELLOW}Navigate: ↑/↓  Switch: TAB  Toggle: SPACE  Run: ENTER  Quit: q${C_RESET}\n"
-    printf "  ${C_YELLOW}Select All: a  Unselect All: u${C_RESET}\n\n"
+    # UPDATED Help Text
+    printf "  ${C_YELLOW}Select All: a  Unselect All: u  Select Not-OK: s  Refresh Status: r${C_RESET}\n\n"
 
     # --- Strategy Selection ---
     _line=5; _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}MERGE STRATEGY (On Conflict):${C_RESET}"
@@ -301,7 +310,6 @@ draw_interface() {
     # Save current line to draw the run button later
     _run_button_line=$((_line + _repo_count + 2))
 
-    # REDRAWN LOOP to use index instead of 'while read'
     i=0
     while [ "$i" -lt "$_repo_count" ]; do
         _line=$((_line + 1));
@@ -379,19 +387,11 @@ EOF
     fi
 }
 
-run_interactive_mode() {
-    # --- Initialize TUI-specific repo variables ---
-    # Extract just the repo names, trimming leading/trailing whitespace
-    _repo_list=$(printf "%s" "$ALL_REPOS" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | cut -d: -f1 | sed '/^$/d')
-    _repo_count=$(echo "$_repo_list" | wc -l)
-
-    # Initialize all repos to be selected ('y')
-    _repo_selection=""
-    i=1; while [ "$i" -le "$_repo_count" ]; do _repo_selection="${_repo_selection}y"; i=$((i+1)); done
-
-    # --- NEW: Pre-load all repository statuses ---
+# --- NEW FUNCTION: To refresh repo statuses ---
+_refresh_repo_statuses() {
+    # Temporarily show a loading message
     _clear_screen; _move_cursor 5 5;
-    printf "${C_BOLD}${C_YELLOW}Loading repository statuses...${C_RESET}"
+    printf "${C_BOLD}${C_YELLOW}Refreshing repository statuses...${C_RESET}"
 
     _repo_status_list=""
     i=1
@@ -402,7 +402,21 @@ run_interactive_mode() {
 "
         i=$((i+1))
     done
-    # --- End Pre-load ---
+}
+
+
+run_interactive_mode() {
+    # --- Initialize TUI-specific repo variables ---
+    # Extract just the repo names, trimming leading/trailing whitespace
+    _repo_list=$(printf "%s" "$ALL_REPOS" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | cut -d: -f1 | sed '/^$/d')
+    _repo_count=$(echo "$_repo_list" | wc -l)
+
+    # Initialize all repos to be selected ('y')
+    _repo_selection=""
+    i=1; while [ "$i" -le "$_repo_count" ]; do _repo_selection="${_repo_selection}y"; i=$((i+1)); done
+
+    # --- Pre-load all repository statuses ---
+    _refresh_repo_statuses # Call the new function
 
     # Reset cursor positions
     _repo_cursor_index=0
@@ -443,6 +457,32 @@ run_interactive_mode() {
                 # Unselect all repositories
                 _repo_selection=""
                 i=1; while [ "$i" -le "$_repo_count" ]; do _repo_selection="${_repo_selection}n"; i=$((i+1)); done
+                ;;
+            selectnotok) # NEW (FIXED)
+                # Select only repos that are not "OK"
+
+                # --- FIX: We must generate the "OK" string with printf ---
+                # This ensures we compare raw ANSI codes to raw ANSI codes.
+                OK_STRING=$(printf "${C_GREEN}OK${C_RESET}")
+                # --- End Fix ---
+
+                new_selection=""
+                i=0
+                while [ "$i" -lt "$_repo_count" ]; do
+                    status=$(echo "$_repo_status_list" | sed -n "$((i + 1))p")
+
+                    # Compare the extracted status against the generated OK_STRING
+                    if [ "$status" != "$OK_STRING" ]; then
+                        new_selection="${new_selection}y" # Select (Not OK)
+                    else
+                        new_selection="${new_selection}n" # Deselect (OK)
+                    fi
+                    i=$((i + 1))
+                done
+                _repo_selection="$new_selection"
+                ;;
+            refresh) # NEW
+                _refresh_repo_statuses
                 ;;
             space)
                 case "$_current_field" in
