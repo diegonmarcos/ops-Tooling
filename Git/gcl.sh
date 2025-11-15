@@ -15,7 +15,10 @@
 # - MODIFIED: Changed shortcuts/labels per user request (Pull='l', Local='o', Remote='E')
 # - FIXED: Corrected TUI labels (L O CAL, S T ATUS) per request.
 # - FIXED: Removed yellow/orange from help text per request.
-# - FIXED: Reverted buggy full-line highlight for Strategy/Action/Run per request.
+# - FIXED: TUI highlighting for Strategy/Action/Run reverted to text-only to fix render bugs.
+# - FIXED: RUN button escape codes showing literally - removed embedded color codes.
+# - FIXED: Blue highlight rectangle not filling whole line - removed embedded C_RESET codes.
+# - FIXED: Only highlight selected option in Strategy/Action, not all options in the field.
 
 # --- Configuration: Repository Lists ---
 PUBLIC_REPOS="
@@ -302,62 +305,75 @@ _read_key() {
 
 draw_interface() {
     _clear_screen; _move_cursor 0 0
-    # Get terminal width
+    # Get terminal width (though this fix doesn't need it, it's good practice)
     _t_width=${COLUMNS:-$(tput cols)}
 
     printf "${C_BOLD}${C_CYAN}╔══════════════════════════════════════════════════════════════════════╗\n"
-    printf "║                  gcl.sh - Git Sync Manager                     ║\n"
+    printf "║                               gcl.sh - Git Sync Manager                                ║\n"
     printf "╚══════════════════════════════════════════════════════════════════════╝${C_RESET}\n"
-    # UPDATED Help Text (Removed C_YELLOW)
     printf "  Navigate: ↑/↓  Switch: TAB  Toggle: SPACE  Run: ENTER  Quit: q\n"
     printf "  Repo List:  ${C_BOLD}a${C_RESET}/${C_BOLD}u${C_RESET} (All/None)  ${C_BOLD}k${C_RESET} (Not OK)  ${C_BOLD}r${C_RESET} (Refresh)\n"
     printf "  Shortcuts:  ${C_BOLD}o${C_RESET}/${C_BOLD}e${C_RESET} (Strategy)  ${C_BOLD}s${C_RESET}/${C_BOLD}p${C_RESET}/${C_BOLD}l${C_RESET}/${C_BOLD}t${C_RESET} (Action)\n\n"
 
 
-    # --- Strategy Selection (HIGHLIGHT FIX) ---
+    # --- Strategy Selection (FIXED with tput el) ---
     _line=7;
     _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}MERGE STRATEGY (On Conflict):${C_RESET}"
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    # MODIFIED: Label for Local (L O CAL)
-    _line_text=$(printf "[%s] L${C_BOLD}O${C_RESET}CAL  (Keep local changes)" "$([ "$_strategy_selected" -eq 0 ] && printf "●" || printf " ")")
-    if [ "$_current_field" -eq 0 ]; then
-        printf "${C_BG_BLUE}%s${C_RESET}" "$_line_text" # Reverted: No padding
+    _line_text=$(printf "[%s] LOCAL  (Keep local changes)" "$([ "$_strategy_selected" -eq 0 ] && printf "●" || printf " ")")
+    if [ "$_current_field" -eq 0 ] && [ "$_strategy_selected" -eq 0 ]; then
+        printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
         printf "%s" "$_line_text"
     fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] R${C_BOLD}E${C_RESET}MOTE (Overwrite with remote)" "$([ "$_strategy_selected" -eq 1 ] && printf "●" || printf " ")")
-    if [ "$_current_field" -eq 0 ]; then
-        printf "${C_BG_BLUE}%s${C_RESET}" "$_line_text" # Reverted: No padding
+    _line_text=$(printf "[%s] REMOTE (Overwrite with remote)" "$([ "$_strategy_selected" -eq 1 ] && printf "●" || printf " ")")
+    if [ "$_current_field" -eq 0 ] && [ "$_strategy_selected" -eq 1 ]; then
+        printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
         printf "%s" "$_line_text"
     fi
     printf "\n"
 
-    # --- Action Selection (HIGHLIGHT FIX) ---
+    # --- Action Selection (FIXED with tput el) ---
     _line=$((_line + 2)); _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}ACTION:${C_RESET}"
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] ${C_BOLD}S${C_RESET}YNC   (Remote <-> Local)" "$([ "$_action_selected" -eq 0 ] && printf "●" || printf " ")")
-    [ "$_current_field" -eq 1 ] && printf "${C_BG_BLUE}%s${C_RESET}" "$_line_text" || printf "%s" "$_line_text" # Reverted
+    _line_text=$(printf "[%s] SYNC   (Remote <-> Local)" "$([ "$_action_selected" -eq 0 ] && printf "●" || printf " ")")
+    if [ "$_current_field" -eq 1 ] && [ "$_action_selected" -eq 0 ]; then
+        printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
+    else
+        printf "%s" "$_line_text"
+    fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] ${C_BOLD}P${C_RESET}USH   (Local -> Remote)" "$([ "$_action_selected" -eq 1 ] && printf "●" || printf " ")")
-    [ "$_current_field" -eq 1 ] && printf "${C_BG_BLUE}%s${C_RESET}" "$_line_text" || printf "%s" "$_line_text" # Reverted
+    _line_text=$(printf "[%s] PUSH   (Local -> Remote)" "$([ "$_action_selected" -eq 1 ] && printf "●" || printf " ")")
+    if [ "$_current_field" -eq 1 ] && [ "$_action_selected" -eq 1 ]; then
+        printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
+    else
+        printf "%s" "$_line_text"
+    fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] PU${C_BOLD}L${C_RESET}L (Remote -> Local)" "$([ "$_action_selected" -eq 2 ] && printf "●" || printf " ")")
-    [ "$_current_field" -eq 1 ] && printf "${C_BG_BLUE}%s${C_RESET}" "$_line_text" || printf "%s" "$_line_text" # Reverted
+    _line_text=$(printf "[%s] PULL (Remote -> Local)" "$([ "$_action_selected" -eq 2 ] && printf "●" || printf " ")")
+    if [ "$_current_field" -eq 1 ] && [ "$_action_selected" -eq 2 ]; then
+        printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
+    else
+        printf "%s" "$_line_text"
+    fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    # MODIFIED: Label for Status (S T ATUS)
-    _line_text=$(printf "[%s] S${C_BOLD}T${C_RESET}ATUS (Check repos)" "$([ "$_action_selected" -eq 3 ] && printf "●" || printf " ")")
-    [ "$_current_field" -eq 1 ] && printf "${C_BG_BLUE}%s${C_RESET}" "$_line_text" || printf "%s" "$_line_text" # Reverted
+    _line_text=$(printf "[%s] STATUS (Check repos)" "$([ "$_action_selected" -eq 3 ] && printf "●" || printf " ")")
+    if [ "$_current_field" -eq 1 ] && [ "$_action_selected" -eq 3 ]; then
+        printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
+    else
+        printf "%s" "$_line_text"
+    fi
     printf "\n"
 
-    # --- Repository Selection (HIGHLIGHT FIX) ---
+    # --- Repository Selection (FIXED with tput el) ---
     _line=$((_line + 2));
     _move_cursor $_line 2;  printf "${C_BOLD}${C_BLUE}REPOSITORIES (Toggle with SPACE):${C_RESET}"
     _move_cursor $_line 40; printf "${C_BOLD}${C_BLUE}STATUS:${C_RESET}"
@@ -378,9 +394,10 @@ draw_interface() {
 
         _move_cursor $_line 4
         if [ "$_current_field" -eq 2 ] && [ "$i" -eq "$_repo_cursor_index" ]; then
-            _line_width=$((_t_width - 4))
-            printf "${C_BG_BLUE}%-${_line_width}.${_line_width}s${C_RESET}" "$_full_line"
+            # This is the new fix: print text, fill line, reset
+            printf "${C_BG_BLUE}%s" "$_full_line"; tput el; printf "${C_RESET}"
         else
+            # This is the original, correct code for non-selected lines
             printf "%s" "$repo_line"
             _move_cursor $_line 40
             printf "%s" "$status_string"
@@ -390,14 +407,15 @@ draw_interface() {
     done
 
 
-    # --- Execute Button (HIGHLIGHT FIX) ---
+    # --- Execute Button (FIXED with tput el) ---
     _move_cursor $_run_button_line 2
-    # MODIFIED: Removed trailing spaces from text
-    _line_text="  ${C_BOLD}[ RUN ]${C_RESET}"
+    _line_text="   [ RUN ]"
     if [ "$_current_field" -eq 3 ]; then
-        printf "${C_BG_GREEN}%s${C_RESET}" "$_line_text" # Reverted
+        # When selected: green background
+        printf "${C_BG_GREEN}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
-        printf "%s" "$_line_text"
+        # When not selected: just bold text
+        printf "${C_BOLD}%s${C_RESET}" "$_line_text"
     fi
     _move_cursor $(($_run_button_line + 2)) 0
 }
@@ -580,7 +598,7 @@ show_help() {
     printf "  (no command)\t\tLaunches the interactive TUI menu.\n"
     printf "  ${C_GREEN}sync [local|remote]${C_RESET}\tBidirectional sync. Default: 'remote'.\n"
     printf "  ${C_GREEN}push${C_RESET}\t\t\tPushes committed changes.\n"
-    printf "  ${C_GREEN}pull${C_RESET}\t\t\tPulls using 'remote' strategy.\n"
+    printf "  ${C_GREEN}pull${C_RESET}\t\t\tPPulls using 'remote' strategy.\n"
     printf "  ${C_GREEN}status${C_RESET}\t\t\tChecks git status for all repos.\n"
     printf "  ${C_GREEN}help${C_RESET}\t\t\tShows this help message.\n\E[0m\n"
 }
@@ -594,7 +612,7 @@ main() {
         status) run_cli_status ;;
         help|-h|--help) show_help ;;
         "") run_interactive_mode ;;
-        *) _error "Invalid command: $1"; show_host_help; exit 1 ;;
+        *) _error "Invalid command: $1"; show_help; exit 1 ;;
     esac
 }
 
