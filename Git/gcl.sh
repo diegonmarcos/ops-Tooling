@@ -19,6 +19,7 @@
 # - FIXED: RUN button escape codes showing literally - removed embedded color codes.
 # - FIXED: Blue highlight rectangle not filling whole line - removed embedded C_RESET codes.
 # - FIXED: Only highlight selected option in Strategy/Action, not all options in the field.
+# - ENHANCED: Made shortcut letters bold (O in LOCAL, E in REMOTE, S/P/L/T in actions).
 
 # --- Configuration: Repository Lists ---
 PUBLIC_REPOS="
@@ -53,7 +54,7 @@ _current_field=0          # 0=strategy, 1=action, 2=repos, 3=run button
 _total_fields=4
 
 # --- Color and Terminal Control ---
-C_RESET="\033[0m"; C_BOLD="\033[1m"; C_RED="\033[31m"; C_GREEN="\033[32m";
+C_RESET="\033[0m"; C_BOLD="\033[1m"; C_BOLD_OFF="\033[22m"; C_RED="\033[31m"; C_GREEN="\033[32m";
 C_YELLOW="\033[33m"; C_BLUE="\033[34m"; C_CYAN="\033[36m";
 C_BG_BLUE="\033[44m"; C_BG_GREEN="\033[42m";
 
@@ -321,7 +322,7 @@ draw_interface() {
     _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}MERGE STRATEGY (On Conflict):${C_RESET}"
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] LOCAL  (Keep local changes)" "$([ "$_strategy_selected" -eq 0 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] L${C_BOLD}O${C_BOLD_OFF}CAL  (Keep local changes)" "$([ "$_strategy_selected" -eq 0 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 0 ] && [ "$_strategy_selected" -eq 0 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -329,7 +330,7 @@ draw_interface() {
     fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] REMOTE (Overwrite with remote)" "$([ "$_strategy_selected" -eq 1 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] R${C_BOLD}E${C_BOLD_OFF}MOTE (Overwrite with remote)" "$([ "$_strategy_selected" -eq 1 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 0 ] && [ "$_strategy_selected" -eq 1 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -341,7 +342,7 @@ draw_interface() {
     _line=$((_line + 2)); _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}ACTION:${C_RESET}"
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] SYNC   (Remote <-> Local)" "$([ "$_action_selected" -eq 0 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] ${C_BOLD}S${C_BOLD_OFF}YNC   (Remote <-> Local)" "$([ "$_action_selected" -eq 0 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 1 ] && [ "$_action_selected" -eq 0 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -349,7 +350,7 @@ draw_interface() {
     fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] PUSH   (Local -> Remote)" "$([ "$_action_selected" -eq 1 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] ${C_BOLD}P${C_BOLD_OFF}USH   (Local -> Remote)" "$([ "$_action_selected" -eq 1 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 1 ] && [ "$_action_selected" -eq 1 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -357,7 +358,7 @@ draw_interface() {
     fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] PULL (Remote -> Local)" "$([ "$_action_selected" -eq 2 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] PU${C_BOLD}L${C_BOLD_OFF}L (Remote -> Local)" "$([ "$_action_selected" -eq 2 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 1 ] && [ "$_action_selected" -eq 2 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -365,7 +366,7 @@ draw_interface() {
     fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] STATUS (Check repos)" "$([ "$_action_selected" -eq 3 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] S${C_BOLD}T${C_BOLD_OFF}ATUS (Check repos)" "$([ "$_action_selected" -eq 3 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 1 ] && [ "$_action_selected" -eq 3 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
