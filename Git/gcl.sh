@@ -6,6 +6,8 @@
 # - Added 'r' key to refresh status panel.
 # - Added 's' key to select only "not OK" repos.
 # - FIXED: 's' key was selecting all repos.
+# - MODIFIED: 'sync' action now adds+commits before pushing.
+# - MODIFIED: 'Enter' key now triggers RUN from anywhere.
 
 # --- Configuration: Repository Lists ---
 PUBLIC_REPOS="
@@ -112,10 +114,25 @@ process_repo() {
             printf "  Pulling with strategy: ${C_BOLD}%s${C_RESET}\n" "$strategy"
             if git -C "$repo_dir" pull -q --strategy-option="$strategy"; then
                 _success "Pull complete."
+
+                # --- MODIFICATION: ADD+COMMIT+PUSH FOR SYNC ---
                 if [ "$action" = "sync" ]; then
+                    printf "  Staging all changes...\n"
+                    git -C "$repo_dir" add .
+                    # Commit only if there are staged changes
+                    if ! git -C "$repo_dir" diff-index --quiet --cached HEAD --; then
+                        printf "  Found changes, committing with default message 'fixes'...\n"
+                        if git -C "$repo_dir" commit -q -m "fixes"; then
+                            _success "Commit complete."
+                        else
+                            _error "Commit failed unexpectedly."
+                        fi
+                    fi
+
                     printf "  Pushing changes...\n"
                     if git -C "$repo_dir" push -q; then _success "Push complete."; else _warn "Push failed (no changes or permissions issue)."; fi
                 fi
+                # --- END MODIFICATION ---
             else
                 _error "Pull failed."
             fi
@@ -264,8 +281,8 @@ draw_interface() {
     printf "${C_BOLD}${C_CYAN}╔══════════════════════════════════════════════════════════════════════╗\n"
     printf "║                  gcl.sh - Git Sync Manager                     ║\n"
     printf "╚══════════════════════════════════════════════════════════════════════╝${C_RESET}\n"
-    printf "  ${C_YELLOW}Navigate: ↑/↓  Switch: TAB  Toggle: SPACE  Run: ENTER  Quit: q${C_RESET}\n"
     # UPDATED Help Text
+    printf "  ${C_YELLOW}Navigate: ↑/↓  Switch: TAB  Toggle: SPACE  Run: ENTER  Quit: q${C_RESET}\n"
     printf "  ${C_YELLOW}Select All: a  Unselect All: u  Select Not-OK: s  Refresh Status: r${C_RESET}\n\n"
 
     # --- Strategy Selection ---
@@ -493,23 +510,17 @@ run_interactive_mode() {
                         new_char=$([ "$current_char" = "y" ] && echo "n" || echo "y")
                         _repo_selection=$(echo "$_repo_selection" | sed "s/./$new_char/$((_repo_cursor_index + 1))")
                         ;;
-                    3)
-                        run_tui_action
-                        if [ $? -eq 0 ]; then
-                            _return_to_menu=1
-                        fi
-                        break
-                        ;;
+                    # Field 3 (RUN) is no longer triggered by SPACE
                 esac
                 ;;
             enter)
-                if [ "$_current_field" -eq 3 ]; then
-                    run_tui_action
-                    if [ $? -eq 0 ]; then
-                        _return_to_menu=1
-                    fi
-                    break
+                # --- MODIFICATION: ENTER TRIGGERS RUN ---
+                run_tui_action
+                if [ $? -eq 0 ]; then
+                    _return_to_menu=1
                 fi
+                break
+                # --- END MODIFICATION ---
                 ;;
             quit) break ;;
         esac
