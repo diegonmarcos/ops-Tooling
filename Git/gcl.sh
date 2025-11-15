@@ -1,6 +1,7 @@
 #!/bin/sh
 
 # gcl.sh - A simple, POSIX-compliant git clone/pull/push manager with TUI and CLI modes.
+# MODIFIED: Added TUI-based repo status panel on the right.
 
 # --- Configuration: Repository Lists ---
 PUBLIC_REPOS="
@@ -25,10 +26,11 @@ ALL_REPOS="${PUBLIC_REPOS}${PRIVATE_REPOS}"
 
 # --- TUI State Variables ---
 _strategy_selected=1      # 0=LOCAL, 1=REMOTE (default)
-_action_selected=0        # 0=SYNC (default), 1=PUSH, 2=PULL
+_action_selected=0        # 0=SYNC (default), 1=PUSH, 2=PULL, 3=STATUS
 _repo_cursor_index=0      # For scrolling through repos
 _repo_selection=""        # A string of 'y'/'n' for each repo
 _repo_list=""             # A newline-separated list of repo names
+_repo_status_list=""      # A newline-separated list of repo statuses
 _repo_count=0
 _current_field=0          # 0=strategy, 1=action, 2=repos, 3=run button
 _total_fields=4
@@ -52,6 +54,40 @@ _error() { printf "${C_RED}  ✗ %s${C_RESET}\n" "$1"; }
 _warn() { printf "${C_YELLOW}  ⚠ %s${C_RESET}\n" "$1"; }
 
 # --- Core Git Functions ---
+
+# NEW FUNCTION: Silently checks the status of a single repo for the TUI
+# @param $1: Repository directory name
+_get_repo_status() {
+    repo_dir="$1"
+
+    if ! [ -d "$repo_dir" ]; then
+        printf "${C_YELLOW}Not Cloned${C_RESET}"
+        return
+    fi
+
+    # Check for uncommitted changes (staged and unstaged)
+    if ! git -C "$repo_dir" diff-index --quiet HEAD -- 2>/dev/null; then
+        printf "${C_YELLOW}Uncommitted${C_RESET}"
+        return
+    fi
+
+    # Check if branch tracks a remote
+    if ! git -C "$repo_dir" rev-parse @{u} >/dev/null 2>&1; then
+        printf "${C_RED}No Remote${C_RESET}"
+        return
+    fi
+
+    # Check for unpushed commits
+    unpushed=$(git -C "$repo_dir" log @{u}.. --oneline 2>/dev/null | wc -l)
+    if [ "$unpushed" -gt 0 ]; then
+        printf "${C_YELLOW}%s Unpushed${C_RESET}" "$unpushed"
+        return
+    fi
+
+    printf "${C_GREEN}OK${C_RESET}"
+}
+
+
 # @param $1: Repository directory name
 # @param $2: Repository git URL
 # @param $3: Pull strategy ('ours' or 'theirs' or 'none' for push-only)
@@ -62,13 +98,13 @@ process_repo() {
     _log "Processing '$repo_dir'"
 
     if ! [ -d "$repo_dir" ]; then
-        _log "Cloning '$repo_dir'வைக்..."
+        _log "Cloning '$repo_dir'..."
         if git clone -q "$repo_url" "$repo_dir"; then _success "Clone complete."; else _error "Clone failed."; fi
         printf "\n"; return
     fi
 
     case "$action" in
-        sync|pull) 
+        sync|pull)
             printf "  Pulling with strategy: ${C_BOLD}%s${C_RESET}\n" "$strategy"
             if git -C "$repo_dir" pull -q --strategy-option="$strategy"; then
                 _success "Pull complete."
@@ -79,7 +115,7 @@ process_repo() {
             else
                 _error "Pull failed."
             fi
-            ;; 
+            ;;
         push)
             printf "  Staging all changes...\n"
             git -C "$repo_dir" add .
@@ -94,7 +130,7 @@ process_repo() {
             fi
             printf "  Pushing changes...\n"
             if git -C "$repo_dir" push -q; then _success "Push complete."; else _warn "Push failed (no changes or permissions issue)."; fi
-            ;; 
+            ;;
     esac
     printf "\n"
 }
@@ -258,24 +294,38 @@ draw_interface() {
     printf "$C_RESET\n"
 
     # --- Repository Selection ---
-    _line=$((_line + 2)); _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}REPOSITORIES (Toggle with SPACE):${C_RESET}"
-    
+    _line=$((_line + 2));
+    _move_cursor $_line 2;  printf "${C_BOLD}${C_BLUE}REPOSITORIES (Toggle with SPACE):${C_RESET}"
+    _move_cursor $_line 40; printf "${C_BOLD}${C_BLUE}STATUS:${C_RESET}" # NEW HEADER
+
     # Save current line to draw the run button later
     _run_button_line=$((_line + _repo_count + 2))
 
+    # REDRAWN LOOP to use index instead of 'while read'
     i=0
-    printf "%s" "$_repo_list" | while IFS= read -r repo_name || [ -n "$repo_name" ]; do
-        _line=$((_line + 1)); _move_cursor $_line 4
-        
+    while [ "$i" -lt "$_repo_count" ]; do
+        _line=$((_line + 1));
+
+        repo_name=$(echo "$_repo_list" | sed -n "$((i + 1))p")
         is_selected=$(echo "$_repo_selection" | cut -c $((i + 1)))
-        
-        # Highlight if this is the active field and the cursor is on this repo
+        status_string=$(echo "$_repo_status_list" | sed -n "$((i + 1))p")
+        marker="$([ "$is_selected" = "y" ] && printf "✓" || printf " ")"
+
+        # Format the repo name line, truncating/padding to 30 chars
+        repo_line=$(printf "[%s] %-30.30s" "$marker" "$repo_name")
+
+        # Apply background highlight if selected
+        _move_cursor $_line 4
         if [ "$_current_field" -eq 2 ] && [ "$i" -eq "$_repo_cursor_index" ]; then
-            printf "$C_BG_BLUE"
+            printf "${C_BG_BLUE}%s${C_RESET}" "$repo_line"
+        else
+            printf "%s" "$repo_line"
         fi
 
-        printf "[%s] %s" "$([ "$is_selected" = "y" ] && printf "✓" || printf " ")" "$repo_name"
-        printf "$C_RESET"
+        # Print status string in its column
+        _move_cursor $_line 40
+        printf "%s" "$status_string"
+
         i=$((i + 1))
     done
 
@@ -334,9 +384,25 @@ run_interactive_mode() {
     # Extract just the repo names, trimming leading/trailing whitespace
     _repo_list=$(printf "%s" "$ALL_REPOS" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | cut -d: -f1 | sed '/^$/d')
     _repo_count=$(echo "$_repo_list" | wc -l)
+
     # Initialize all repos to be selected ('y')
     _repo_selection=""
     i=1; while [ "$i" -le "$_repo_count" ]; do _repo_selection="${_repo_selection}y"; i=$((i+1)); done
+
+    # --- NEW: Pre-load all repository statuses ---
+    _clear_screen; _move_cursor 5 5;
+    printf "${C_BOLD}${C_YELLOW}Loading repository statuses...${C_RESET}"
+
+    _repo_status_list=""
+    i=1
+    while [ "$i" -le "$_repo_count" ]; do
+        repo_name=$(echo "$_repo_list" | sed -n "${i}p")
+        status=$(_get_repo_status "$repo_name")
+        _repo_status_list="${_repo_status_list}${status}
+"
+        i=$((i+1))
+    done
+    # --- End Pre-load ---
 
     # Reset cursor positions
     _repo_cursor_index=0
