@@ -8,6 +8,8 @@
 # - FIXED: 's' key was selecting all repos.
 # - MODIFIED: 'sync' action now adds+commits before pushing.
 # - MODIFIED: 'Enter' key now triggers RUN from anywhere.
+# - FIXED: "m" + "enter" auto-run bug.
+# - ADDED: All-lowercase shortcuts as requested (l/e, s/p/c/t, k/r/a/u).
 
 # --- Configuration: Repository Lists ---
 PUBLIC_REPOS="
@@ -262,13 +264,27 @@ _read_key() {
         key="space"
     elif [ "$char" = "$(printf '\t')" ]; then
         key="tab"
+    # --- New Shortcuts ---
+    elif [ "$char" = "l" ]; then
+        key="local"
+    elif [ "$char" = "e" ]; then
+        key="remote"
+    elif [ "$char" = "s" ]; then
+        key="sync"
+    elif [ "$char" = "p" ]; then
+        key="push"
+    elif [ "$char" = "c" ]; then
+        key="pull"
+    elif [ "$char" = "t" ]; then
+        key="status"
+    elif [ "$char" = "k" ]; then
+        key="selectnotok"
+    # --- End New Shortcuts ---
     elif [ "$char" = "a" ]; then
         key="selectall"
     elif [ "$char" = "u" ]; then
         key="unselectall"
-    elif [ "$char" = "s" ]; then # NEW
-        key="selectnotok"
-    elif [ "$char" = "r" ]; then # NEW
+    elif [ "$char" = "r" ]; then
         key="refresh"
     elif [ "$char" = "q" ]; then
         key="quit"
@@ -283,46 +299,49 @@ draw_interface() {
     printf "╚══════════════════════════════════════════════════════════════════════╝${C_RESET}\n"
     # UPDATED Help Text
     printf "  ${C_YELLOW}Navigate: ↑/↓  Switch: TAB  Toggle: SPACE  Run: ENTER  Quit: q${C_RESET}\n"
-    printf "  ${C_YELLOW}Select All: a  Unselect All: u  Select Not-OK: s  Refresh Status: r${C_RESET}\n\n"
+    printf "  ${C_YELLOW}Repo List:  ${C_BOLD}a${C_RESET}/${C_BOLD}u${C_RESET} (All/None)  ${C_BOLD}k${C_RESET} (Not OK)  ${C_BOLD}r${C_RESET} (Refresh)${C_RESET}\n"
+    printf "  ${C_YELLOW}Shortcuts:  ${C_BOLD}l${C_RESET}/${C_BOLD}e${C_RESET} (Strategy)  ${C_BOLD}s${C_RESET}/${C_BOLD}p${C_RESET}/${C_BOLD}c${C_RESET}/${C_BOLD}t${C_RESET} (Action)${C_RESET}\n\n"
+
 
     # --- Strategy Selection ---
-    _line=5; _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}MERGE STRATEGY (On Conflict):${C_RESET}"
+    _line=7; # Adjusted line for new help text
+    _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}MERGE STRATEGY (On Conflict):${C_RESET}"
     _line=$((_line + 1)); _move_cursor $_line 4
     [ "$_current_field" -eq 0 ] && printf "$C_BG_BLUE"
-    printf "[%s] LOCAL  (Keep local changes)" "$([ "$_strategy_selected" -eq 0 ] && printf "●" || printf " ")"
+    printf "[%s] ${C_BOLD}L${C_RESET}OCAL  (Keep local changes)" "$([ "$_strategy_selected" -eq 0 ] && printf "●" || printf " ")"
     printf "$C_RESET"
 
     _line=$((_line + 1)); _move_cursor $_line 4
     [ "$_current_field" -eq 0 ] && printf "$C_BG_BLUE"
-    printf "[%s] REMOTE (Overwrite with remote)" "$([ "$_strategy_selected" -eq 1 ] && printf "●" || printf " ")"
+    printf "[%s] R${C_BOLD}e${C_RESET}MOTE (Overwrite with remote)" "$([ "$_strategy_selected" -eq 1 ] && printf "●" || printf " ")"
     printf "$C_RESET\n"
 
     # --- Action Selection ---
     _line=$((_line + 2)); _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}ACTION:${C_RESET}"
     _line=$((_line + 1)); _move_cursor $_line 4
     [ "$_current_field" -eq 1 ] && printf "$C_BG_BLUE"
-    printf "[%s] SYNC   (Remote <-> Local)" "$([ "$_action_selected" -eq 0 ] && printf "●" || printf " ")"
+    printf "[%s] ${C_BOLD}S${C_RESET}YNC   (Remote <-> Local)" "$([ "$_action_selected" -eq 0 ] && printf "●" || printf " ")"
     printf "$C_RESET"
 
     _line=$((_line + 1)); _move_cursor $_line 4
     [ "$_current_field" -eq 1 ] && printf "$C_BG_BLUE"
-    printf "[%s] PUSH   (Local -> Remote)" "$([ "$_action_selected" -eq 1 ] && printf "●" || printf " ")"
+    printf "[%s] ${C_BOLD}P${C_RESET}USH   (Local -> Remote)" "$([ "$_action_selected" -eq 1 ] && printf "●" || printf " ")"
     printf "$C_RESET"
 
     _line=$((_line + 1)); _move_cursor $_line 4
     [ "$_current_field" -eq 1 ] && printf "$C_BG_BLUE"
-    printf "[%s] PULL   (Remote -> Local)" "$([ "$_action_selected" -eq 2 ] && printf "●" || printf " ")"
+    printf "[%s] PULL (${C_BOLD}c${C_RESET}) (Remote -> Local)" "$([ "$_action_selected" -eq 2 ] && printf "●" || printf " ")"
     printf "$C_RESET"
 
     _line=$((_line + 1)); _move_cursor $_line 4
     [ "$_current_field" -eq 1 ] && printf "$C_BG_BLUE"
-    printf "[%s] STATUS (Check repos)" "$([ "$_action_selected" -eq 3 ] && printf "●" || printf " ")"
+    printf "[%s] S${C_BOLD}t${C_RESET}ATUS (Check repos)" "$([ "$_action_selected" -eq 3 ] && printf "●" || printf " ")"
     printf "$C_RESET\n"
 
     # --- Repository Selection ---
     _line=$((_line + 2));
     _move_cursor $_line 2;  printf "${C_BOLD}${C_BLUE}REPOSITORIES (Toggle with SPACE):${C_RESET}"
-    _move_cursor $_line 40; printf "${C_BOLD}${C_BLUE}STATUS:${C_RESET}" # NEW HEADER
+    _move_cursor $_line 40; printf "${C_BOLD}${C_BLUE}STATUS:${C_RESET}"
 
     # Save current line to draw the run button later
     _run_button_line=$((_line + _repo_count + 2))
@@ -394,17 +413,17 @@ EOF
     printf "\n${C_GREEN}${C_BOLD}All tasks complete!${C_RESET}\n"
     printf "${C_YELLOW}Press 'm' to return to menu or any other key to exit.${C_RESET}\n"
 
-    # Read a single character
-    choice=$(dd bs=1 count=1 2>/dev/null)
-
-    if [ "$choice" = "m" ] || [ "$choice" = "M" ]; then
-        return 0  # Return to menu (will restart TUI)
-    else
-        return 1  # Exit
-    fi
+    # --- BUG FIX: Use 'read -r' to consume the newline ---
+    # This prevents the 'enter' from being passed to the next TUI loop
+    read -r choice
+    case "$choice" in
+        m*|M*) return 0 ;; # Return to menu
+        *) return 1 ;;     # Exit
+    esac
+    # --- END BUG FIX ---
 }
 
-# --- NEW FUNCTION: To refresh repo statuses ---
+# --- FUNCTION: To refresh repo statuses ---
 _refresh_repo_statuses() {
     # Temporarily show a loading message
     _clear_screen; _move_cursor 5 5;
@@ -465,42 +484,43 @@ run_interactive_mode() {
             tab)
                 _current_field=$(((_current_field + 1) % _total_fields))
                 ;;
-            selectall)
-                # Select all repositories
+
+            # --- Repo Selection Shortcuts ---
+            selectall) # 'a'
                 _repo_selection=""
                 i=1; while [ "$i" -le "$_repo_count" ]; do _repo_selection="${_repo_selection}y"; i=$((i+1)); done
                 ;;
-            unselectall)
-                # Unselect all repositories
+            unselectall) # 'u'
                 _repo_selection=""
                 i=1; while [ "$i" -le "$_repo_count" ]; do _repo_selection="${_repo_selection}n"; i=$((i+1)); done
                 ;;
-            selectnotok) # NEW (FIXED)
-                # Select only repos that are not "OK"
-
-                # --- FIX: We must generate the "OK" string with printf ---
-                # This ensures we compare raw ANSI codes to raw ANSI codes.
+            selectnotok) # 'k'
                 OK_STRING=$(printf "${C_GREEN}OK${C_RESET}")
-                # --- End Fix ---
-
                 new_selection=""
                 i=0
                 while [ "$i" -lt "$_repo_count" ]; do
                     status=$(echo "$_repo_status_list" | sed -n "$((i + 1))p")
-
-                    # Compare the extracted status against the generated OK_STRING
                     if [ "$status" != "$OK_STRING" ]; then
-                        new_selection="${new_selection}y" # Select (Not OK)
+                        new_selection="${new_selection}y"
                     else
-                        new_selection="${new_selection}n" # Deselect (OK)
+                        new_selection="${new_selection}n"
                     fi
                     i=$((i + 1))
                 done
                 _repo_selection="$new_selection"
                 ;;
-            refresh) # NEW
+            refresh) # 'r'
                 _refresh_repo_statuses
                 ;;
+
+            # --- Menu Shortcuts ---
+            local)  _strategy_selected=0 ;; # 'l'
+            remote) _strategy_selected=1 ;; # 'e'
+            sync)   _action_selected=0 ;; # 's'
+            push)   _action_selected=1 ;; # 'p'
+            pull)   _action_selected=2 ;; # 'c'
+            status) _action_selected=3 ;; # 't'
+
             space)
                 case "$_current_field" in
                     0) _strategy_selected=$((1 - _strategy_selected)) ;;
@@ -510,17 +530,14 @@ run_interactive_mode() {
                         new_char=$([ "$current_char" = "y" ] && echo "n" || echo "y")
                         _repo_selection=$(echo "$_repo_selection" | sed "s/./$new_char/$((_repo_cursor_index + 1))")
                         ;;
-                    # Field 3 (RUN) is no longer triggered by SPACE
                 esac
                 ;;
             enter)
-                # --- MODIFICATION: ENTER TRIGGERS RUN ---
                 run_tui_action
                 if [ $? -eq 0 ]; then
                     _return_to_menu=1
                 fi
                 break
-                # --- END MODIFICATION ---
                 ;;
             quit) break ;;
         esac
@@ -544,7 +561,7 @@ show_help() {
     printf "  ${C_GREEN}push${C_RESET}\t\t\tPushes committed changes.\n"
     printf "  ${C_GREEN}pull${C_RESET}\t\t\tPulls using 'remote' strategy.\n"
     printf "  ${C_GREEN}status${C_RESET}\t\t\tChecks git status for all repos.\n"
-    printf "  ${C_GREEN}help${C_RESET}\t\t\tShows this help message.\n\n"
+    printf "  ${C_GREEN}help${C_RESET}\t\t\tShows this help message.\n\E[0m\n"
 }
 
 # --- Main Entry Point ---
