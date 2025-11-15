@@ -10,6 +10,7 @@
 # - MODIFIED: 'Enter' key now triggers RUN from anywhere.
 # - FIXED: "m" + "enter" auto-run bug.
 # - ADDED: All-lowercase shortcuts as requested (l/e, s/p/c/t, k/r/a/u).
+# - FIXED: "divergent branches" error by adding --no-rebase to pull command.
 
 # --- Configuration: Repository Lists ---
 PUBLIC_REPOS="
@@ -114,10 +115,13 @@ process_repo() {
     case "$action" in
         sync|pull)
             printf "  Pulling with strategy: ${C_BOLD}%s${C_RESET}\n" "$strategy"
-            if git -C "$repo_dir" pull -q --strategy-option="$strategy"; then
+
+            # --- FIX: Added --no-rebase to force a merge ---
+            # This prevents "divergent branches" error and allows --strategy-option to work.
+            if git -C "$repo_dir" pull -q --no-rebase --strategy-option="$strategy"; then
+            # --- END FIX ---
                 _success "Pull complete."
 
-                # --- MODIFICATION: ADD+COMMIT+PUSH FOR SYNC ---
                 if [ "$action" = "sync" ]; then
                     printf "  Staging all changes...\n"
                     git -C "$repo_dir" add .
@@ -134,7 +138,6 @@ process_repo() {
                     printf "  Pushing changes...\n"
                     if git -C "$repo_dir" push -q; then _success "Push complete."; else _warn "Push failed (no changes or permissions issue)."; fi
                 fi
-                # --- END MODIFICATION ---
             else
                 _error "Pull failed."
             fi
