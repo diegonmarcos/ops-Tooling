@@ -160,6 +160,21 @@ process_repo() {
 
     case "$action" in
         sync|pull)
+            # First, commit any uncommitted changes to avoid merge conflicts
+            if ! git -C "$repo_dir" diff-index --quiet HEAD -- 2>/dev/null; then
+                printf "  Found uncommitted changes, committing before pull...\n"
+                git -C "$repo_dir" add .
+                if ! git -C "$repo_dir" diff-index --quiet --cached HEAD -- 2>/dev/null; then
+                    if git -C "$repo_dir" commit -q -m "Auto-commit before pull"; then
+                        _success "Changes committed."
+                    else
+                        _error "Commit failed. Cannot pull with uncommitted changes."
+                        printf "\n"
+                        return
+                    fi
+                fi
+            fi
+
             printf "  Pulling with strategy: ${C_BOLD}%s${C_RESET}\n" "$strategy"
 
             # --- FIX: Added --no-rebase to force a merge ---
@@ -347,9 +362,11 @@ _read_key() {
 
 draw_interface() {
     _clear_screen; _move_cursor 0 0
-    # Get terminal width (though this fix doesn't need it, it's good practice)
+    # Get terminal width and height
     _t_width=${COLUMNS:-$(tput cols)}
+    _t_height=${LINES:-$(tput lines)}
 
+    # Always use full layout
     printf "${C_BOLD}${C_CYAN}╔════════════════════════════════════════════════════════════════════════════════════╗\n"
     printf "║                           gcl.sh - Git Sync Manager                            ║\n"
     printf "╚════════════════════════════════════════════════════════════════════════════════════╝${C_RESET}\n"
@@ -678,8 +695,16 @@ run_interactive_mode() {
     _repo_selection=""
     i=1; while [ "$i" -le "$_repo_count" ]; do _repo_selection="${_repo_selection}y"; i=$((i+1)); done
 
-    # --- Pre-load all repository statuses ---
-    _refresh_repo_statuses # Call the new function
+    # --- Pre-load repository statuses (local only for fast startup) ---
+    _refresh_status_only # Fast startup: local status only, no remote fetch
+
+    # Initialize fetch status with placeholder
+    _repo_fetch_status_list=""
+    i=1; while [ "$i" -le "$_repo_count" ]; do
+        _repo_fetch_status_list="${_repo_fetch_status_list}${C_YELLOW}Not Checked${C_RESET}
+"
+        i=$((i+1))
+    done
 
     # Reset cursor positions
     _repo_cursor_index=0

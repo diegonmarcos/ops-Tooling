@@ -1,0 +1,10 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Name=GitSyncMan
+Exec=/home/diego/Documents/Git/ops-Tooling/Git/gcl.sh
+Icon=utilities-terminal
+Terminal=true
+Type=Application
+Categories=Development;
+Comment=Launches the GitSyncMan shell script in a terminal
+StartupNotify=true
