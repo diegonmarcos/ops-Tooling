@@ -308,6 +308,8 @@ class TUI:
             curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_GREEN)  # Run button
 
         # Do a quick local status scan on startup
+        self.status_message = "Loading repository statuses..."
+        self.draw()  # Show loading message
         self.refresh_local_status()
 
     def refresh_local_status(self):
@@ -757,6 +759,12 @@ class TUI:
                 curses.init_pair(5, curses.COLOR_YELLOW, curses.COLOR_BLACK)
                 curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_CYAN)
                 curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_GREEN)
+
+            # Refresh status when returning to menu
+            self.status_message = "Refreshing repository statuses..."
+            self.draw()
+            self.refresh_local_status()
+            self.draw()  # Redraw without status message
             return
 
         strategy = 'ours' if self.strategy_selected == 0 else 'theirs'
@@ -798,6 +806,12 @@ class TUI:
                 curses.init_pair(5, curses.COLOR_YELLOW, curses.COLOR_BLACK)
                 curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_CYAN)
                 curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_GREEN)
+
+            # Refresh status when returning to menu
+            self.status_message = "Refreshing repository statuses..."
+            self.draw()
+            self.refresh_local_status()
+            self.draw()  # Redraw without status message
 
     def run(self):
         """Main TUI loop"""
