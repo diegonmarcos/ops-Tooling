@@ -383,8 +383,8 @@ class TUI:
             self.stdscr.addstr(row, 4, f"[{marker0}] LOCAL  (Keep local changes)", attr_s0)
         else:
             self.stdscr.addstr(row, 4, f"[{marker0}] L")
-            self.stdscr.addstr(row, 8, "O", curses.color_pair(5) | curses.A_BOLD)
-            self.stdscr.addstr(row, 9, "CAL  (Keep local changes)")
+            self.stdscr.addstr(row, 9, "O", curses.color_pair(5) | curses.A_BOLD)
+            self.stdscr.addstr(row, 10, "CAL  (Keep local changes)")
         row += 1
 
         # Strategy 1: REMOTE with 'E' highlighted
@@ -394,8 +394,8 @@ class TUI:
             self.stdscr.addstr(row, 4, f"[{marker1}] REMOTE (Overwrite with remote)", attr_s1)
         else:
             self.stdscr.addstr(row, 4, f"[{marker1}] R")
-            self.stdscr.addstr(row, 8, "E", curses.color_pair(5) | curses.A_BOLD)
-            self.stdscr.addstr(row, 9, "MOTE (Overwrite with remote)")
+            self.stdscr.addstr(row, 9, "E", curses.color_pair(5) | curses.A_BOLD)
+            self.stdscr.addstr(row, 10, "MOTE (Overwrite with remote)")
         row += 3
 
         # Action
@@ -724,6 +724,10 @@ class TUI:
 
     def execute_action(self):
         """Execute the selected action on selected repos"""
+        import sys
+        import tty
+        import termios
+
         # Restore terminal for command output
         curses.endwin()
 
@@ -737,21 +741,28 @@ class TUI:
         if not Path(work_dir).is_dir():
             error(f"Working directory does not exist: {work_dir}")
             print(f"\n{Colors.YELLOW}Press any key to return to menu...{Colors.RESET}")
-
-            import sys
-            import tty
-            import termios
+            sys.stdout.flush()
 
             fd = sys.stdin.fileno()
             old_settings = termios.tcgetattr(fd)
             try:
                 tty.setraw(fd)
-                sys.stdin.read(1)
+                ch = sys.stdin.read(1)
             finally:
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
             print()
             self.stdscr = curses.initscr()
+            curses.curs_set(0)
+            if curses.has_colors():
+                curses.start_color()
+                curses.init_pair(1, curses.COLOR_CYAN, curses.COLOR_BLACK)
+                curses.init_pair(2, curses.COLOR_BLUE, curses.COLOR_BLACK)
+                curses.init_pair(3, curses.COLOR_GREEN, curses.COLOR_BLACK)
+                curses.init_pair(4, curses.COLOR_RED, curses.COLOR_BLACK)
+                curses.init_pair(5, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+                curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_CYAN)
+                curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_GREEN)
             return
 
         strategy = 'ours' if self.strategy_selected == 0 else 'theirs'
@@ -778,12 +789,9 @@ class TUI:
         print(f"{Colors.GREEN}{Colors.BOLD}                  All tasks complete!                          {Colors.RESET}")
         print("═" * 60)
         print(f"\n{Colors.YELLOW}Press 'q' to quit or any other key to return to menu...{Colors.RESET}")
+        sys.stdout.flush()
 
         # Get user input with proper terminal handling
-        import sys
-        import tty
-        import termios
-
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
         try:
