@@ -390,7 +390,7 @@ class TUI:
         self.TOTAL_FIELDS = 5
 
         self.STRATEGIES = ["L(o)cal  (Keep local changes)", "R(e)mote (Overwrite with remote)"]
-        self.ACTIONS = ["(S)ync   (Remote <-> Local)", "(P)ush   (Local -> Remote)", "Pu(l)l   (Remote -> Local)", "Sta(t)us (Check repos)", "U(n)tracked (List all untracked)"]
+        self.ACTIONS = ["(S)ync   (Remote <-> Local)", "(P)ush   (Local -> Remote)", "Pu(l)l   (Remote -> Local)", "U(n)tracked (List all untracked)"]
 
         max_y, max_x = stdscr.getmaxyx()
         if max_y < 30 or max_x < 80:
@@ -466,7 +466,7 @@ class TUI:
         self.stdscr.addstr(y + 1, 2, "─" * (len(title)), self.C_BLUE)
         y += 2
         for i, option_text in enumerate(options):
-            attr = self.C_HIGHLIGHT if is_active_field and i == selected_index else curses.A_NORMAL
+            attr = self.C_HIGHLIGHT if is_active_field else curses.A_NORMAL
             
             final_attr = attr
             if i == selected_index:
@@ -539,78 +539,24 @@ class TUI:
         self.stdscr.addstr(run_line, 4, "[ RUN ]", run_attr)
 
         help_line = run_line + 3
-        if help_line < max_y - 7:
+        if help_line < max_y - 6:
             self.stdscr.addstr(help_line, 2, "KEYBOARD SHORTCUTS", self.C_BLUE | self.C_BOLD)
             help_line += 1
             self.stdscr.addstr(help_line, 2, "─" * (max_x - 4), self.C_BLUE)
             help_line += 1
 
-            # Navigate
-            self.stdscr.addstr(help_line, 2, "Navigate:", self.C_BOLD)
-            self.stdscr.addstr(help_line, 12, " (")
-            self.stdscr.addstr("↑/↓", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") List | (")
-            self.stdscr.addstr("TAB", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") Field | (")
-            self.stdscr.addstr("SPACE", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") Toggle | (")
-            self.stdscr.addstr("ENTER", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") Run | (")
-            self.stdscr.addstr("q", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") Quit")
+            self.stdscr.addstr(help_line, 2, f"{self.C_BOLD}Navigate:{curses.A_NORMAL} (TAB) Field | (↑/↓) Item | (SPACE) Toggle | (ENTER) Run | (q) Quit")
             help_line += 1
-
-            # Select
-            self.stdscr.addstr(help_line, 2, "Select:  ", self.C_BOLD)
-            self.stdscr.addstr(help_line, 12, " (")
-            self.stdscr.addstr("a", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") All | (")
-            self.stdscr.addstr("u", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") None | (")
-            self.stdscr.addstr("k", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") Not OK")
+            self.stdscr.addstr(help_line, 2, f"{self.C_BOLD}Select:  {curses.A_NORMAL} (a) All | (u) None | (k) Not OK")
             help_line += 1
-
-            # Strategy
-            self.stdscr.addstr(help_line, 2, "Strategy:", self.C_BOLD)
-            self.stdscr.addstr(help_line, 12, " (")
-            self.stdscr.addstr("o", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") Local | (")
-            self.stdscr.addstr("e", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") Remote")
+            self.stdscr.addstr(help_line, 2, f"{self.C_BOLD}Actions: {curses.A_NORMAL} (s) Sync | (p) Push | (l) Pull | (n) Untracked")
             help_line += 1
-
-            # Actions
-            self.stdscr.addstr(help_line, 2, "Actions: ", self.C_BOLD)
-            self.stdscr.addstr(help_line, 12, " (")
-            self.stdscr.addstr("s", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") Sync | (")
-            self.stdscr.addstr("p", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") Push | (")
-            self.stdscr.addstr("l", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") Pull")
-            help_line += 1
-            self.stdscr.addstr(help_line, 12, " (")
-            self.stdscr.addstr("n", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") Untracked | (")
-            self.stdscr.addstr("t", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") Status | (")
-            self.stdscr.addstr("f", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") Fetch | (")
-            self.stdscr.addstr("r", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") Refresh")
-            help_line += 1
-            
-            # Tools
-            self.stdscr.addstr(help_line, 2, "Tools:   ", self.C_BOLD)
-            self.stdscr.addstr(help_line, 12, " (")
-            self.stdscr.addstr("w", self.C_YELLOW | self.C_BOLD)
-            self.stdscr.addstr(") Toggle Workdir")
+            self.stdscr.addstr(help_line, 2, f"{self.C_BOLD}Refresh: {curses.A_NORMAL} (t) Local Status | (f) Remote Status | (r) Both")
         
         self.stdscr.refresh()
 
     def execute_action(self) -> bool:
-        action_map = ['sync', 'push', 'pull', 'status', 'untracked']
+        action_map = ['sync', 'push', 'pull', 'untracked']
         strategy_map = ['local', 'theirs']
 
         action = action_map[self.state.action_selected]
@@ -636,7 +582,6 @@ class TUI:
         if action == 'sync': run_cli_sync(strategy, repos=selected_repos)
         elif action == 'push': run_cli_push(repos=selected_repos)
         elif action == 'pull': run_cli_pull(repos=selected_repos)
-        elif action == 'status': run_cli_status(repos=selected_repos)
         elif action == 'untracked': run_cli_untracked(repos=selected_repos)
 
         print("="*60)
@@ -660,7 +605,7 @@ class TUI:
         if ch.lower() == 'q':
             return False
         
-        self.refresh_both()
+        # self.refresh_both() # Removed to prevent delay
         return True
 
     def show_message(self, message: str):
@@ -718,8 +663,9 @@ class TUI:
             elif key == ord('s'): self.state.action_selected = 0
             elif key == ord('p'): self.state.action_selected = 1
             elif key == ord('l'): self.state.action_selected = 2
-            elif key == ord('t'): self.state.action_selected = 3
-            elif key == ord('n'): self.state.action_selected = 4
+            elif key == ord('n'): self.state.action_selected = 3
+            elif key == ord('t'): self.refresh_status_only()
+            elif key == ord('f'): self.refresh_fetch_only()
             elif key == ord('r'): self.refresh_both()
 
 def run_tui():

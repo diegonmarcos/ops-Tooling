@@ -44,7 +44,7 @@ ALL_REPOS="${PUBLIC_REPOS}${PRIVATE_REPOS}"
 
 # --- TUI State Variables ---
 _strategy_selected=1      # 0=LOCAL, 1=REMOTE (default)
-_action_selected=0        # 0=SYNC (default), 1=PUSH, 2=PULL, 3=STATUS
+_action_selected=0        # 0=SYNC (default), 1=PUSH, 2=PULL, 3=STATUS, 4=FETCH, 5=UNTRACKED
 _repo_cursor_index=0      # For scrolling through repos
 _repo_selection=""        # A string of 'y'/'n' for each repo
 _repo_list=""             # A newline-separated list of repo names
@@ -333,6 +333,29 @@ run_cli_pull() {
     done
 }
 
+run_cli_fetch() {
+    repos_to_process="${1:-$ALL_REPOS}"
+    _log "Starting Fetch"
+    printf "%s" "$repos_to_process" | while IFS=: read -r repo_dir repo_url;
+        do
+        [ -z "$repo_dir" ] && continue
+        if ! echo "$repo_dir" | grep -q ':'; then
+            repo_url=$(printf "%s" "$ALL_REPOS" | grep "^${repo_dir}:" | cut -d: -f2-)
+        fi
+        if [ -d "$repo_dir" ]; then
+            printf "  Fetching in '$repo_dir'...\n"
+            if git -C "$repo_dir" fetch 2>&1; then
+                _success "Fetch complete."
+            else
+                _error "Fetch failed."
+            fi
+        else
+            _warn "'$repo_dir' not cloned. Skipping."
+        fi
+        printf "\n"
+    done
+}
+
 run_cli_status() {
     repos_to_process="${1:-$ALL_REPOS}"
     _log "Checking Git Status for Repositories"
@@ -453,6 +476,8 @@ _read_key() {
     elif [ "$char" = "t" ]; then
         key="statusonly"
     elif [ "$char" = "f" ]; then
+        key="fetch"
+    elif [ "$char" = "v" ]; then
         key="fetchonly"
     elif [ "$char" = "r" ]; then
         key="refresh"
@@ -547,6 +572,8 @@ draw_interface() {
         printf "%s" "$_line_text"
     fi
 
+    _line=$((_line + 1)); # Jump line
+
     _line=$((_line + 1)); _move_cursor $_line 4
     _line_text=$(printf "[%s] S${C_BOLD}T${C_BOLD_OFF}ATUS (Check repos)" "$([ "$_action_selected" -eq 3 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 3 ]; then
@@ -556,8 +583,16 @@ draw_interface() {
     fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] U${C_BOLD}N${C_BOLD_OFF}TRACKED (List all untracked)" "$([ "$_action_selected" -eq 4 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] ${C_BOLD}F${C_BOLD_OFF}ETCH (Fetch from remote)" "$([ "$_action_selected" -eq 4 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 4 ]; then
+        printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
+    else
+        printf "%s" "$_line_text"
+    fi
+
+    _line=$((_line + 1)); _move_cursor $_line 4
+    _line_text=$(printf "[%s] U${C_BOLD}N${C_BOLD_OFF}TRACKED (List all untracked)" "$([ "$_action_selected" -eq 5 ] && printf "●" || printf " ")")
+    if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 5 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
         printf "%s" "$_line_text"
@@ -636,10 +671,10 @@ draw_interface() {
     _help_line=$((_help_line + 1))
 
     _move_cursor $_help_line 2
-    printf "${C_BOLD}Actions:${C_RESET}  (${C_YELLOW}${C_BOLD}s${C_RESET}) Sync | (${C_YELLOW}${C_BOLD}p${C_RESET}) Push | (${C_YELLOW}${C_BOLD}l${C_RESET}) Pull\n"
+    printf "${C_BOLD}Actions:${C_RESET}  (${C_YELLOW}${C_BOLD}s${C_RESET}) Sync | (${C_YELLOW}${C_BOLD}p${C_RESET}) Push | (${C_YELLOW}${C_BOLD}l${C_RESET}) Pull | (${C_YELLOW}${C_BOLD}f${C_RESET}) Fetch\n"
     _help_line=$((_help_line + 1))
 
-    _move_cursor $_help_line 13; printf "(${C_YELLOW}${C_BOLD}n${C_RESET}) Untracked | (${C_YELLOW}${C_BOLD}t${C_RESET}) Status | (${C_YELLOW}${C_BOLD}f${C_RESET}) Fetch | (${C_YELLOW}${C_BOLD}r${C_RESET}) Refresh\n"
+    _move_cursor $_help_line 13; printf "(${C_YELLOW}${C_BOLD}n${C_RESET}) Untracked | (${C_YELLOW}${C_BOLD}t${C_RESET}) Status | (${C_YELLOW}${C_BOLD}v${C_RESET}) View Remote | (${C_YELLOW}${C_BOLD}r${C_RESET}) Refresh\n"
     _help_line=$((_help_line + 1))
 
     _move_cursor $_help_line 2
@@ -709,7 +744,8 @@ EOF
             1) run_cli_push "$selected_repos" ;;
             2) run_cli_pull "$selected_repos" ;;
             3) run_cli_status "$selected_repos" ;;
-            4) run_cli_untracked "$selected_repos" ;;
+            4) run_cli_fetch "$selected_repos" ;;
+            5) run_cli_untracked "$selected_repos" ;;
         esac
     fi
 
@@ -982,13 +1018,14 @@ run_interactive_mode() {
             sync)   _action_selected=0 ;; # 's'
             push)   _action_selected=1 ;; # 'p'
             pull)   _action_selected=2 ;; # 'l'
-            untracked) _action_selected=4 ;; # 'n'
+            fetch)  _action_selected=4 ;; # 'f'
+            untracked) _action_selected=5 ;; # 'n'
 
             space)
                 case "$_current_field" in
                     0) _workdir_selected=$((1 - _workdir_selected)) ;;
                     1) _strategy_selected=$((1 - _strategy_selected)) ;;
-                    2) _action_selected=$(((_action_selected + 1) % 5)) ;;
+                    2) _action_selected=$(((_action_selected + 1) % 6)) ;;
                     3) # Toggle repo selection
                         current_char=$(echo "$_repo_selection" | cut -c $((_repo_cursor_index + 1)))
                         new_char=$([ "$current_char" = "y" ] && echo "n" || echo "y")
@@ -1024,6 +1061,7 @@ show_help() {
     printf "  ${C_GREEN}sync [local|remote]${C_RESET}\tBidirectional sync. Default: 'remote'.\n"
     printf "  ${C_GREEN}push${C_RESET}\t\t\tPushes committed changes.\n"
     printf "  ${C_GREEN}pull${C_RESET}\t\t\tPulls using 'remote' strategy.\n"
+    printf "  ${C_GREEN}fetch${C_RESET}\t\t\tFetches from remote.\n"
     printf "  ${C_GREEN}status${C_RESET}\t\t\tChecks git status for all repos.\n"
     printf "  ${C_GREEN}untracked${C_RESET}\t\tLists ALL untracked files (including ignored).\n"
     printf "  ${C_GREEN}help${C_RESET}\t\t\tShows this help message.\n\E[0m\n"
@@ -1035,6 +1073,7 @@ main() {
         sync) run_cli_sync "$2" ;;
         push) run_cli_push ;;
         pull) run_cli_pull ;;
+        fetch) run_cli_fetch ;;
         status) run_cli_status ;;
         untracked) run_cli_untracked ;;
         help|-h|--help) show_help ;;
