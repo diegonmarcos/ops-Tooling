@@ -727,17 +727,30 @@ class TUI:
         # Restore terminal for command output
         curses.endwin()
 
-        print("═" * 60)
-        print("                  Executing Actions...                      ")
-        print("═" * 60)
+        print(f"{Colors.BOLD}{Colors.CYAN}{'═' * 63}{Colors.RESET}")
+        print(f"{Colors.BOLD}{Colors.CYAN}                    Executing Actions...                       {Colors.RESET}")
+        print(f"{Colors.BOLD}{Colors.CYAN}{'═' * 63}{Colors.RESET}")
         print()
 
         work_dir = "." if self.workdir_selected == 0 else self.workdir_path
 
         if not Path(work_dir).is_dir():
             error(f"Working directory does not exist: {work_dir}")
-            print("\nPress Enter to return to menu...")
-            input()
+            print(f"\n{Colors.YELLOW}Press any key to return to menu...{Colors.RESET}")
+
+            import sys
+            import tty
+            import termios
+
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                sys.stdin.read(1)
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+            print()
             self.stdscr = curses.initscr()
             return
 
@@ -761,12 +774,12 @@ class TUI:
         print("\nRefreshing repository statuses...")
         self.refresh_local_status()
 
-        print("\n═" * 60)
-        print("                  All tasks complete!                       ")
+        print("\n" + "═" * 60)
+        print(f"{Colors.GREEN}{Colors.BOLD}                  All tasks complete!                          {Colors.RESET}")
         print("═" * 60)
-        print("\nPress 'q' to quit or any other key to return to menu...")
+        print(f"\n{Colors.YELLOW}Press 'q' to quit or any other key to return to menu...{Colors.RESET}")
 
-        # Get user input
+        # Get user input with proper terminal handling
         import sys
         import tty
         import termios
@@ -778,6 +791,9 @@ class TUI:
             ch = sys.stdin.read(1)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+        # Print newline after input
+        print()
 
         if ch == 'q' or ch == 'Q':
             self.running = False
