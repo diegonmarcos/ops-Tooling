@@ -44,7 +44,7 @@ ALL_REPOS="${PUBLIC_REPOS}${PRIVATE_REPOS}"
 
 # --- TUI State Variables ---
 _strategy_selected=1      # 0=LOCAL, 1=REMOTE (default)
-_action_selected=0        # 0=SYNC (default), 1=PUSH, 2=PULL, 3=STATUS, 4=FETCH, 5=UNTRACKED
+_action_selected=0        # 0=SYNC (default), 1=PUSH, 2=PULL, 3=STATUS, 4=FETCH, 5=UNTRACKED, 6=IGNORED
 _repo_cursor_index=0      # For scrolling through repos
 _repo_selection=""        # A string of 'y'/'n' for each repo
 _repo_list=""             # A newline-separated list of repo names
@@ -60,7 +60,7 @@ _workdir_cursor_pos=28    # Cursor position when editing (start at end)
 
 # --- Color and Terminal Control ---
 C_RESET="\033[0m"; C_BOLD="\033[1m"; C_BOLD_OFF="\033[22m"; C_RED="\033[31m"; C_GREEN="\033[32m";
-C_YELLOW="\033[33m"; C_BLUE="\033[34m"; C_CYAN="\033[36m";
+C_YELLOW="\033[33m"; C_BLUE="\033[34m"; C_CYAN="\033[36m"; C_ORANGE="\033[38;5;208m"; C_GRAY="\033[90m";
 C_BG_BLUE="\033[44m"; C_BG_GREEN="\033[42m";
 
 _clear_screen() { tput clear; }
@@ -101,13 +101,13 @@ _get_repo_status() {
     repo_dir="$1"
 
     if ! [ -d "$repo_dir" ]; then
-        printf "${C_YELLOW}Not Cloned${C_RESET}"
+        printf "${C_RED}Not Cloned${C_RESET}"
         return
     fi
 
     # Check for uncommitted changes (staged and unstaged)
     if ! git -C "$repo_dir" diff-index --quiet HEAD -- 2>/dev/null; then
-        printf "${C_YELLOW}Uncommitted${C_RESET}"
+        printf "${C_RED}Uncommitted${C_RESET}"
         return
     fi
 
@@ -120,7 +120,7 @@ _get_repo_status() {
     # Check for unpushed commits
     unpushed=$(git -C "$repo_dir" log @{u}.. --oneline 2>/dev/null | wc -l)
     if [ "$unpushed" -gt 0 ]; then
-        printf "${C_YELLOW}%s Unpushed${C_RESET}" "$unpushed"
+        printf "${C_RED}%s Unpushed${C_RESET}" "$unpushed"
         return
     fi
 
@@ -133,7 +133,7 @@ _get_repo_fetch_status() {
     repo_dir="$1"
 
     if ! [ -d "$repo_dir" ]; then
-        printf "${C_YELLOW}Not Cloned${C_RESET}"
+        printf "${C_RED}Not Cloned${C_RESET}"
         return
     fi
 
@@ -211,7 +211,8 @@ process_repo() {
                     printf "  Staging all changes...\n"
                     git -C "$repo_dir" add .
                     # Commit only if there are staged changes
-                    if ! git -C "$repo_dir" diff-index --quiet --cached HEAD --; then
+                    if ! git -C "$repo_dir" diff-index --quiet --cached HEAD --;
+ then
                         printf "  Found changes, committing with default message 'fixes'...\n"
                         if git -C "$repo_dir" commit -q -m "fixes"; then
                             _success "Commit complete."
@@ -271,7 +272,8 @@ process_repo() {
             printf "  Staging all changes...\n"
             git -C "$repo_dir" add .
             # Commit only if there are staged changes
-            if ! git -C "$repo_dir" diff-index --quiet --cached HEAD --; then
+            if ! git -C "$repo_dir" diff-index --quiet --cached HEAD --;
+ then
                 printf "  Found changes, committing with default message 'fixes'...\n"
                 if git -C "$repo_dir" commit -q -m "fixes"; then
                     _success "Commit complete."
@@ -404,9 +406,9 @@ run_cli_status() {
 
 run_cli_untracked() {
     repos_to_process="${1:-$ALL_REPOS}"
-    _log "Listing ALL Untracked Files (including ignored files)"
-    printf "%s" "$repos_to_process" | while IFS=: read -r repo_dir repo_url;
-        do
+    _log "Listing Untracked Files (excluding ignored files)"
+    while IFS=: read -r repo_dir repo_url;
+    do
         [ -z "$repo_dir" ] && continue
         if ! echo "$repo_dir" | grep -q ':'; then
             repo_url=$(printf "%s" "$ALL_REPOS" | grep "^${repo_dir}:" | cut -d: -f2-)
@@ -420,8 +422,8 @@ run_cli_untracked() {
 
         _log "Checking '$repo_dir'"
 
-        # Get ALL untracked files (including those that would be ignored by .gitignore)
-        untracked_files=$(git -C "$repo_dir" ls-files --others)
+        # Get untracked files (excluding those that would be ignored by .gitignore)
+        untracked_files=$(git -C "$repo_dir" ls-files --others --exclude-standard)
 
         if [ -n "$untracked_files" ]; then
             untracked_count=$(echo "$untracked_files" | wc -l)
@@ -433,7 +435,45 @@ run_cli_untracked() {
         fi
 
         printf "\n"
-    done
+    done <<EOF
+$(printf "%s" "$repos_to_process")
+EOF
+}
+
+run_cli_ignored() {
+    repos_to_process="${1:-$ALL_REPOS}"
+    _log "Listing Ignored Files"
+    while IFS=: read -r repo_dir repo_url;
+    do
+        [ -z "$repo_dir" ] && continue
+        if ! echo "$repo_dir" | grep -q ':'; then
+            repo_url=$(printf "%s" "$ALL_REPOS" | grep "^${repo_dir}:" | cut -d: -f2-)
+        fi
+
+        if ! [ -d "$repo_dir" ]; then
+            _warn "'$repo_dir' not cloned yet."
+            printf "\n"
+            continue
+        fi
+
+        _log "Checking '$repo_dir'"
+
+        # Get ignored files
+        ignored_files=$(git -C "$repo_dir" ls-files --others --ignored --exclude-standard)
+
+        if [ -n "$ignored_files" ]; then
+            ignored_count=$(echo "$ignored_files" | wc -l)
+            _warn "Has $ignored_count ignored file(s)"
+            printf "  ${C_YELLOW}Ignored files:${C_RESET}\n"
+            echo "$ignored_files" | sed 's/^/    /'
+        else
+            _success "No ignored files"
+        fi
+
+        printf "\n"
+    done <<EOF
+$(printf "%s" "$repos_to_process")
+EOF
 }
 
 # --- TUI Functions ---
@@ -444,8 +484,8 @@ _read_key() {
     if [ "$char" = "$(printf '\033')" ]; then
         char2=$(dd bs=1 count=2 2>/dev/null)
         case "$char2" in
-            '[A') key="up" ;;
-            '[B') key="down" ;;
+            '[A') key="up" ;; 
+            '[B') key="down" ;; 
         esac
     elif [ "$char" = "$(printf '\n')" ] || [ "$char" = "$(printf '\r')" ]; then
         key="enter"
@@ -466,6 +506,8 @@ _read_key() {
         key="pull"
     elif [ "$char" = "n" ]; then # NEW: 'n' for uNtracked
         key="untracked"
+    elif [ "$char" = "i" ]; then
+        key="ignored"
     elif [ "$char" = "k" ]; then
         key="selectnotok"
     # --- End New Shortcuts ---
@@ -474,11 +516,9 @@ _read_key() {
     elif [ "$char" = "u" ]; then
         key="unselectall"
     elif [ "$char" = "t" ]; then
-        key="statusonly"
+        key="status"
     elif [ "$char" = "f" ]; then
         key="fetch"
-    elif [ "$char" = "v" ]; then
-        key="fetchonly"
     elif [ "$char" = "r" ]; then
         key="refresh"
     elif [ "$char" = "w" ]; then
@@ -528,7 +568,7 @@ draw_interface() {
     _move_cursor $((_line + 1)) 2; printf "${C_BLUE}══════════════════════════════${C_RESET}"
 
     _line=$((_line + 2)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] L${C_BOLD}O${C_BOLD_OFF}CAL  (Keep local changes)" "$([ "$_strategy_selected" -eq 0 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] L${C_YELLOW}${C_BOLD}O${C_RESET}CAL  (Keep local changes)" "$([ "$_strategy_selected" -eq 0 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 1 ] && [ "$_strategy_selected" -eq 0 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -536,7 +576,7 @@ draw_interface() {
     fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] R${C_BOLD}E${C_BOLD_OFF}MOTE (Overwrite with remote)" "$([ "$_strategy_selected" -eq 1 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] R${C_YELLOW}${C_BOLD}E${C_RESET}MOTE (Overwrite with remote)" "$([ "$_strategy_selected" -eq 1 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 1 ] && [ "$_strategy_selected" -eq 1 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -549,7 +589,7 @@ draw_interface() {
     _move_cursor $((_line + 1)) 2; printf "${C_BLUE}═══════${C_RESET}"
 
     _line=$((_line + 2)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] ${C_BOLD}S${C_BOLD_OFF}YNC   (Remote <-> Local)" "$([ "$_action_selected" -eq 0 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] ${C_YELLOW}${C_BOLD}S${C_RESET}YNC   (Remote <-> Local)" "$([ "$_action_selected" -eq 0 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 0 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -557,7 +597,7 @@ draw_interface() {
     fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] ${C_BOLD}P${C_BOLD_OFF}USH   (Local -> Remote)" "$([ "$_action_selected" -eq 1 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] ${C_YELLOW}${C_BOLD}P${C_RESET}USH   (Local -> Remote)" "$([ "$_action_selected" -eq 1 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 1 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -565,7 +605,7 @@ draw_interface() {
     fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] PU${C_BOLD}L${C_BOLD_OFF}L (Remote -> Local)" "$([ "$_action_selected" -eq 2 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] PU${C_YELLOW}${C_BOLD}L${C_RESET}L (Remote -> Local)" "$([ "$_action_selected" -eq 2 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 2 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -575,7 +615,7 @@ draw_interface() {
     _line=$((_line + 1)); # Jump line
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] S${C_BOLD}T${C_BOLD_OFF}ATUS (Check repos)" "$([ "$_action_selected" -eq 3 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] S${C_YELLOW}${C_BOLD}T${C_RESET}ATUS (Check repos)" "$([ "$_action_selected" -eq 3 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 3 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -583,7 +623,7 @@ draw_interface() {
     fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] ${C_BOLD}F${C_BOLD_OFF}ETCH (Fetch from remote)" "$([ "$_action_selected" -eq 4 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] ${C_YELLOW}${C_BOLD}F${C_RESET}ETCH (Fetch from remote)" "$([ "$_action_selected" -eq 4 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 4 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -591,8 +631,16 @@ draw_interface() {
     fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] U${C_BOLD}N${C_BOLD_OFF}TRACKED (List all untracked)" "$([ "$_action_selected" -eq 5 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] U${C_YELLOW}${C_BOLD}N${C_RESET}TRACKED (List untracked files)" "$([ "$_action_selected" -eq 5 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 5 ]; then
+        printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
+    else
+        printf "%s" "$_line_text"
+    fi
+
+    _line=$((_line + 1)); _move_cursor $_line 4
+    _line_text=$(printf "[%s] ${C_YELLOW}${C_BOLD}I${C_RESET}GNORED (List ignored files)" "$([ "$_action_selected" -eq 6 ] && printf "●" || printf " ")")
+    if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 6 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
         printf "%s" "$_line_text"
@@ -674,7 +722,7 @@ draw_interface() {
     printf "${C_BOLD}Actions:${C_RESET}  (${C_YELLOW}${C_BOLD}s${C_RESET}) Sync | (${C_YELLOW}${C_BOLD}p${C_RESET}) Push | (${C_YELLOW}${C_BOLD}l${C_RESET}) Pull | (${C_YELLOW}${C_BOLD}f${C_RESET}) Fetch\n"
     _help_line=$((_help_line + 1))
 
-    _move_cursor $_help_line 13; printf "(${C_YELLOW}${C_BOLD}n${C_RESET}) Untracked | (${C_YELLOW}${C_BOLD}t${C_RESET}) Status | (${C_YELLOW}${C_BOLD}v${C_RESET}) View Remote | (${C_YELLOW}${C_BOLD}r${C_RESET}) Refresh\n"
+    _move_cursor $_help_line 13; printf "(${C_YELLOW}${C_BOLD}n${C_RESET}) Untracked | (${C_YELLOW}${C_BOLD}t${C_RESET}) Status | (${C_YELLOW}${C_BOLD}r${C_RESET}) Refresh\n"
     _help_line=$((_help_line + 1))
 
     _move_cursor $_help_line 2
@@ -728,8 +776,12 @@ run_tui_action() {
     while IFS= read -r repo_name || [ -n "$repo_name" ]; do
         is_selected=$(echo "$_repo_selection" | cut -c $((i + 1)))
         if [ "$is_selected" = "y" ]; then
-            selected_repos="${selected_repos}${repo_name}
-"
+            if [ -z "$selected_repos" ]; then
+                selected_repos="$repo_name"
+            else
+                selected_repos="${selected_repos}
+${repo_name}"
+            fi
         fi
         i=$((i + 1))
     done <<EOF
@@ -740,12 +792,13 @@ EOF
         _warn "No repositories selected. Nothing to do."
     else
         case "$_action_selected" in
-            0) run_cli_sync "$([ "$_strategy_selected" -eq 0 ] && echo "local" || echo "remote")" "$selected_repos" ;;
-            1) run_cli_push "$selected_repos" ;;
-            2) run_cli_pull "$selected_repos" ;;
-            3) run_cli_status "$selected_repos" ;;
-            4) run_cli_fetch "$selected_repos" ;;
-            5) run_cli_untracked "$selected_repos" ;;
+            0) run_cli_sync "$([ "$_strategy_selected" -eq 0 ] && echo "local" || echo "remote")" "$selected_repos" ;; 
+            1) run_cli_push "$selected_repos" ;; 
+            2) run_cli_pull "$selected_repos" ;; 
+            3) run_cli_status "$selected_repos" ;; 
+            4) run_cli_fetch "$selected_repos" ;; 
+            5) run_cli_untracked "$selected_repos" ;; 
+            6) run_cli_ignored "$selected_repos" ;; 
         esac
     fi
 
@@ -755,7 +808,7 @@ EOF
     printf "\n${C_BOLD}${C_CYAN}═══════════════════════════════════════════════════════════════${C_RESET}\n"
     printf "${C_GREEN}${C_BOLD}                  All tasks complete!                          ${C_RESET}\n"
     printf "${C_BOLD}${C_CYAN}═══════════════════════════════════════════════════════════════${C_RESET}\n"
-    printf "${C_YELLOW}Press 'q' to quit or any other key to return to menu.${C_RESET}\n"
+    printf "\n${C_YELLOW}Press 'q' to quit or any other key to return to menu.${C_RESET}\n"
 
     # Read user choice
     read -r choice
@@ -888,7 +941,7 @@ run_interactive_mode() {
     # Initialize fetch status with placeholder
     _repo_fetch_status_list=""
     i=1; while [ "$i" -le "$_repo_count" ]; do
-        _repo_fetch_status_list="${_repo_fetch_status_list}${C_YELLOW}Not Checked${C_RESET}
+        _repo_fetch_status_list="${_repo_fetch_status_list}${C_GRAY}Not Checked${C_RESET}
 "
         i=$((i+1))
     done
@@ -951,11 +1004,9 @@ run_interactive_mode() {
             refresh) # 'r' - Refresh both local status and fetch from remote
                 _refresh_repo_statuses
                 ;;
-            statusonly) # 't' - Status only (local check, no fetch)
+            status) # 't' - Selects STATUS and refreshes local status
+                _action_selected=3
                 _refresh_status_only
-                ;;
-            fetchonly) # 'f' - Fetch only (remote check, no local status)
-                _refresh_fetch_only
                 ;;
             editpath) # 'w'
                 # Allow editing the custom path
@@ -1018,21 +1069,25 @@ run_interactive_mode() {
             sync)   _action_selected=0 ;; # 's'
             push)   _action_selected=1 ;; # 'p'
             pull)   _action_selected=2 ;; # 'l'
-            fetch)  _action_selected=4 ;; # 'f'
+            fetch)
+                _action_selected=4
+                _refresh_fetch_only
+                ;;
             untracked) _action_selected=5 ;; # 'n'
+            ignored) _action_selected=6 ;; # 'i'
 
             space)
                 case "$_current_field" in
-                    0) _workdir_selected=$((1 - _workdir_selected)) ;;
-                    1) _strategy_selected=$((1 - _strategy_selected)) ;;
-                    2) _action_selected=$(((_action_selected + 1) % 6)) ;;
+                    0) _workdir_selected=$((1 - _workdir_selected)) ;; 
+                    1) _strategy_selected=$((1 - _strategy_selected)) ;; 
+                    2) _action_selected=$((($_action_selected + 1) % 7)) ;; 
                     3) # Toggle repo selection
                         current_char=$(echo "$_repo_selection" | cut -c $((_repo_cursor_index + 1)))
                         new_char=$([ "$current_char" = "y" ] && echo "n" || echo "y")
                         _repo_selection=$(echo "$_repo_selection" | sed "s/./$new_char/$((_repo_cursor_index + 1))")
-                        ;;
+                        ;; 
                 esac
-                ;;
+                ;; 
             enter)
                 run_tui_action
                 if [ $? -eq 0 ]; then
@@ -1040,7 +1095,7 @@ run_interactive_mode() {
                 fi
                 break
                 ;;
-            quit) break ;;
+            quit) break ;; 
         esac
     done
     _restore_term
@@ -1063,22 +1118,24 @@ show_help() {
     printf "  ${C_GREEN}pull${C_RESET}\t\t\tPulls using 'remote' strategy.\n"
     printf "  ${C_GREEN}fetch${C_RESET}\t\t\tFetches from remote.\n"
     printf "  ${C_GREEN}status${C_RESET}\t\t\tChecks git status for all repos.\n"
-    printf "  ${C_GREEN}untracked${C_RESET}\t\tLists ALL untracked files (including ignored).\n"
+    printf "  ${C_GREEN}untracked${C_RESET}\t\tLists untracked files (excluding ignored).\n"
+    printf "  ${C_GREEN}ignored${C_RESET}\t\tLists ignored files.\n"
     printf "  ${C_GREEN}help${C_RESET}\t\t\tShows this help message.\n\E[0m\n"
 }
 
 # --- Main Entry Point ---
 main() {
     case "$1" in
-        sync) run_cli_sync "$2" ;;
-        push) run_cli_push ;;
-        pull) run_cli_pull ;;
-        fetch) run_cli_fetch ;;
-        status) run_cli_status ;;
-        untracked) run_cli_untracked ;;
-        help|-h|--help) show_help ;;
-        "") run_interactive_mode ;;
-        *) _error "Invalid command: $1"; show_help; exit 1 ;;
+        sync) run_cli_sync "$2" ;; 
+        push) run_cli_push ;; 
+        pull) run_cli_pull ;; 
+        fetch) run_cli_fetch ;; 
+        status) run_cli_status ;; 
+        untracked) run_cli_untracked ;; 
+        ignored) run_cli_ignored ;; 
+        help|-h|--help) show_help ;; 
+        "") run_interactive_mode ;; 
+        *) _error "Invalid command: $1"; show_help; exit 1 ;; 
     esac
 }
 
