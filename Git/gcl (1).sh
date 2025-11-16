@@ -76,23 +76,6 @@ _success() { printf "${C_GREEN}  ✓ %s${C_RESET}\n" "$1"; }
 _error() { printf "${C_RED}  ✗ %s${C_RESET}\n" "$1"; }
 _warn() { printf "${C_YELLOW}  ⚠ %s${C_RESET}\n" "$1"; }
 
-# Draws a box with a title, dynamically sized to the text.
-# @param $1: The title text
-_draw_dynamic_title_box() {
-    _title_text=" $1 " # Add padding
-    _title_len=$(expr length "$_title_text")
-    _top_bottom_line=""
-    i=0
-    while [ "$i" -lt "$_title_len" ]; do
-        _top_bottom_line="${_top_bottom_line}═"
-        i=$((i + 1))
-    done
-
-    printf "${C_BOLD}${C_CYAN}╔%s╗\n" "$_top_bottom_line"
-    printf "║%s║\n" "$_title_text"
-    printf "╚%s╝${C_RESET}\n" "$_top_bottom_line"
-}
-
 # --- Core Git Functions ---
 
 # Silently checks the status of a single repo for the TUI
@@ -473,10 +456,16 @@ draw_interface() {
     _t_height=${LINES:-$(tput lines)}
 
     # Always use full layout
-    _draw_dynamic_title_box "gcl.sh - Git Sync Manager"
+    printf "${C_BOLD}${C_CYAN}╔════════════════════════════════════════════════════════════════════════════════════╗\n"
+    printf "║                           gcl.sh - Git Sync Manager                            ║\n"
+    printf "╚════════════════════════════════════════════════════════════════════════════════════╝${C_RESET}\n"
+    printf "  Navigate: ↑/↓  Switch: TAB  Toggle: SPACE  Run: ENTER  Quit: q\n"
+    printf "  Repo List:  ${C_BOLD}a${C_RESET}/${C_BOLD}u${C_RESET} (All/None)  ${C_BOLD}k${C_RESET} (Not OK)  ${C_BOLD}t${C_RESET} (Status)  ${C_BOLD}f${C_RESET} (Fetch)  ${C_BOLD}r${C_RESET} (Refresh)  ${C_BOLD}w${C_RESET} (Edit Path)\n"
+    printf "  Shortcuts:  Strategy: ${C_BOLD}o${C_RESET} (Local) ${C_BOLD}e${C_RESET} (Remote)  |  Action: ${C_BOLD}s${C_RESET} (Sync) ${C_BOLD}p${C_RESET} (Push) ${C_BOLD}l${C_RESET} (Pull) ${C_BOLD}n${C_RESET} (Untracked)\n"
+    printf "  Tools:  ${C_BOLD}y${C_RESET} (Restore 0.spec symlinks)\n\n"
 
     # --- Working Directory Selection ---
-    _line=4;
+    _line=9;
     _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}WORKING DIRECTORY:${C_RESET}"
 
     _line=$((_line + 1)); _move_cursor $_line 4
@@ -567,6 +556,8 @@ draw_interface() {
     _move_cursor $_line 40; printf "${C_BOLD}${C_BLUE}LOCAL STATUS:${C_RESET}"
     _move_cursor $_line 60; printf "${C_BOLD}${C_BLUE}REMOTE STATUS:${C_RESET}"
 
+    _run_button_line=$((_line + _repo_count + 3))
+
     i=0
     while [ "$i" -lt "$_repo_count" ]; do
         _line=$((_line + 1));
@@ -596,8 +587,8 @@ draw_interface() {
         i=$((i + 1))
     done
 
+
     # --- Execute Button (FIXED with tput el) ---
-    _run_button_line=$((_line + 2))
     _move_cursor $_run_button_line 2
     _line_text="   [ RUN ]"
     if [ "$_current_field" -eq 4 ]; then
@@ -607,33 +598,7 @@ draw_interface() {
         # When not selected: just bold text
         printf "${C_BOLD}%s${C_RESET}" "$_line_text"
     fi
-
-    # --- MOVED HELP TEXT ---
-    _help_line=$((_run_button_line + 3))
-    _move_cursor $_help_line 2
-    printf "${C_BOLD}${C_BLUE}KEYBOARD SHORTCUTS${C_RESET}\n"
-    _help_line=$((_help_line + 1))
-
-    _move_cursor $_help_line 2
-    printf "${C_BOLD}Navigate:${C_RESET} (${C_YELLOW}${C_BOLD}↑${C_RESET}/${C_YELLOW}${C_BOLD}↓${C_RESET}) List | (${C_YELLOW}${C_BOLD}TAB${C_RESET}) Field | (${C_YELLOW}${C_BOLD}SPACE${C_RESET}) Toggle | (${C_YELLOW}${C_BOLD}ENTER${C_RESET}) Run | (${C_YELLOW}${C_BOLD}q${C_RESET}) Quit\n"
-    _help_line=$((_help_line + 1))
-
-    _move_cursor $_help_line 2
-    printf "${C_BOLD}Select:${C_RESET}   (${C_YELLOW}${C_BOLD}a${C_RESET}) All | (${C_YELLOW}${C_BOLD}u${C_RESET}) None | (${C_YELLOW}${C_BOLD}k${C_RESET}) Not OK\n"
-    _help_line=$((_help_line + 1))
-
-    _move_cursor $_help_line 2
-    printf "${C_BOLD}Strategy:${C_RESET} (${C_YELLOW}${C_BOLD}o${C_RESET}) Local | (${C_YELLOW}${C_BOLD}e${C_RESET}) Remote\n"
-    _help_line=$((_help_line + 1))
-
-    _move_cursor $_help_line 2
-    printf "${C_BOLD}Actions:${C_RESET}  (${C_YELLOW}${C_BOLD}s${C_RESET}) Sync | (${C_YELLOW}${C_BOLD}p${C_RESET}) Push | (${C_YELLOW}${C_BOLD}l${C_RESET}) Pull | (${C_YELLOW}${C_BOLD}n${C_RESET}) Untracked | (${C_YELLOW}${C_BOLD}t${C_RESET}) Status | (${C_YELLOW}${C_BOLD}f${C_RESET}) Fetch | (${C_YELLOW}${C_BOLD}r${C_RESET}) Refresh\n"
-    _help_line=$((_help_line + 1))
-
-    _move_cursor $_help_line 2
-    printf "${C_BOLD}Tools:${C_RESET}    (${C_YELLOW}${C_BOLD}w${C_RESET}) Edit Path | (${C_YELLOW}${C_BOLD}y${C_RESET}) Restore Symlinks\n"
-
-    _move_cursor $(($_help_line + 2)) 0
+    _move_cursor $(($_run_button_line + 2)) 0
 }
 
 run_tui_action() {
