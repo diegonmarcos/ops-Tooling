@@ -3,6 +3,7 @@
 """
 gcl.py - Git Clone/Pull/Push Manager (Python version)
 A TUI-based git repository manager with CLI support
+Matches the gcl.sh TUI layout and functionality
 """
 
 import os
@@ -15,6 +16,7 @@ import argparse
 from dataclasses import dataclass
 import threading
 import queue
+import time
 
 # --- Configuration: Repository Lists ---
 PUBLIC_REPOS = {
@@ -66,371 +68,822 @@ def warn(msg: str):
     """Print warning message"""
     print(f"{Colors.YELLOW}  ⚠ {msg}{Colors.RESET}")
 
-# --- Git Worker Thread ---
-class GitWorker(threading.Thread):
-    def __init__(self, task_queue, result_queue):
-        super().__init__(daemon=True)
-        self.task_queue = task_queue
-        self.result_queue = result_queue
+# --- Git Helper Functions ---
+def run_git(repo_dir: str, *args, timeout=60) -> Tuple[int, str]:
+    """Run git command and return (returncode, output)"""
+    try:
+        result = subprocess.run(
+            ['git', '-C', repo_dir] + list(args),
+            capture_output=True, text=True, timeout=timeout
+        )
+        return result.returncode, result.stdout + result.stderr
+    except subprocess.TimeoutExpired:
+        return 1, "Git command timed out"
+    except Exception as e:
+        return 1, str(e)
 
-    def run_git(self, repo_dir: str, *args, stream=False) -> Tuple[int, str]:
-        """Run git command in repository, with optional streaming."""
-        if not stream:
-            try:
-                result = subprocess.run(
-                    ['git', '-C', repo_dir] + list(args),
-                    capture_output=True, text=True, timeout=60
-                )
-                return result.returncode, result.stdout + result.stderr
-            except subprocess.TimeoutExpired:
-                return 1, "Git command timed out"
-            except Exception as e:
-                return 1, str(e)
-        
-        # Streaming logic
-        try:
-            process = subprocess.Popen(
-                ['git', '-C', repo_dir] + list(args),
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-            )
-            for line in iter(process.stdout.readline, ''):
-                self.result_queue.put(('log', line.strip()))
-            process.stdout.close()
-            return process.wait(), ""
-        except Exception as e:
-            self.result_queue.put(('log', f"Error streaming from git: {e}"))
-            return 1, str(e)
+def get_repo_local_status(repo_dir: str) -> str:
+    """Get local repository status (uncommitted changes, unpushed commits)"""
+    if not Path(repo_dir).is_dir():
+        return "Not Cloned"
 
-    def run(self):
-        while True:
-            task_name, data = self.task_queue.get()
-            if task_name == 'get_status':
-                repo_name, work_dir = data
-                status = self.get_repo_status(str(Path(work_dir) / repo_name))
-                self.result_queue.put(('status', (repo_name, status)))
-            elif task_name == 'get_detail':
-                repo_name, work_dir = data
-                _, detail = self.run_git(str(Path(work_dir) / repo_name), 'status')
-                self.result_queue.put(('detail', detail))
-            elif task_name in ('sync', 'push', 'pull'):
-                repo_name, work_dir, strategy = data
-                self.result_queue.put(('log', f"--- Starting '{task_name}' on '{repo_name}' ---"))
-                
-                repo_path = str(Path(work_dir) / repo_name)
-                if not Path(repo_path).is_dir():
-                    self.result_queue.put(('log', f"Cloning '{repo_name}'..."))
-                    self.run_git(work_dir, 'clone', ALL_REPOS[repo_name], repo_name, stream=True)
-                elif task_name == 'pull':
-                    self.run_git(repo_path, 'pull', '--no-rebase', f'--strategy-option={strategy}', stream=True)
-                elif task_name == 'push':
-                    self.run_git(repo_path, 'push', stream=True)
-                elif task_name == 'sync':
-                    self.run_git(repo_path, 'add', '.', stream=True)
-                    self.run_git(repo_path, 'commit', '-m', 'auto-sync', stream=True)
-                    self.run_git(repo_path, 'pull', '--no-rebase', f'--strategy-option={strategy}', stream=True)
-                    self.run_git(repo_path, 'push', stream=True)
+    # Check for uncommitted changes
+    ret, _ = run_git(repo_dir, 'diff-index', '--quiet', 'HEAD', '--')
+    if ret != 0:
+        return "Uncommitted"
 
-                self.result_queue.put(('log', f"--- Finished '{task_name}' on '{repo_name}' ---"))
-                status = self.get_repo_status(repo_path)
-                self.result_queue.put(('status', (repo_name, status)))
+    # Check if branch tracks a remote
+    ret, _ = run_git(repo_dir, 'rev-parse', '@{u}')
+    if ret != 0:
+        return "No Remote"
 
-            self.task_queue.task_done()
+    # Check for unpushed commits
+    ret, unpushed_out = run_git(repo_dir, 'log', '@{u}..', '--oneline')
+    unpushed = len(unpushed_out.strip().split('\n')) if unpushed_out.strip() else 0
+    if unpushed > 0:
+        return f"{unpushed} Unpushed"
 
-    def get_repo_status(self, repo_dir: str) -> str:
-        """Get a compact, symbolic repository status."""
-        if not Path(repo_dir).is_dir():
-            return f"{Colors.YELLOW}? Not Cloned{Colors.RESET}"
+    return "OK"
 
-        ret, _ = self.run_git(repo_dir, 'diff-index', '--quiet', 'HEAD', '--')
+def get_repo_remote_status(repo_dir: str) -> str:
+    """Get remote repository status (unpulled commits after fetch)"""
+    if not Path(repo_dir).is_dir():
+        return "Not Cloned"
+
+    # Check if branch tracks a remote
+    ret, _ = run_git(repo_dir, 'rev-parse', '@{u}')
+    if ret != 0:
+        return "No Remote"
+
+    # Fetch from remote
+    ret, _ = run_git(repo_dir, 'fetch', '--quiet')
+    if ret != 0:
+        return "Fetch Failed"
+
+    # Check for unpulled commits
+    ret, unpulled_out = run_git(repo_dir, 'log', 'HEAD..@{u}', '--oneline')
+    unpulled = len(unpulled_out.strip().split('\n')) if unpulled_out.strip() else 0
+    if unpulled > 0:
+        return f"{unpulled} To Pull"
+
+    return "Up to Date"
+
+def process_repo(repo_dir: str, repo_url: str, strategy: str, action: str, work_dir: str) -> List[str]:
+    """Process a repository with given action, return list of log messages"""
+    logs = []
+    logs.append(f"==> Processing '{repo_dir}'")
+
+    repo_path = str(Path(work_dir) / repo_dir)
+
+    if not Path(repo_path).is_dir():
+        logs.append(f"  Cloning '{repo_dir}'...")
+        ret, output = run_git(work_dir, 'clone', repo_url, repo_dir)
+        if ret == 0:
+            logs.append(f"  ✓ Clone complete.")
+        else:
+            logs.append(f"  ✗ Clone failed: {output}")
+        return logs
+
+    if action == 'sync':
+        # Commit uncommitted changes
+        ret, _ = run_git(repo_path, 'diff-index', '--quiet', 'HEAD', '--')
         if ret != 0:
-            return f"{Colors.RED}Δ Uncommitted{Colors.RESET}"
+            logs.append("  Found uncommitted changes, committing before pull...")
+            run_git(repo_path, 'add', '.')
+            ret, _ = run_git(repo_path, 'commit', '-q', '-m', 'Auto-commit before pull')
+            if ret == 0:
+                logs.append("  ✓ Changes committed.")
+            else:
+                logs.append("  ✗ Commit failed.")
+                return logs
 
-        ret, _ = self.run_git(repo_dir, 'rev-parse', '@{{u}}')
+        # Pull
+        logs.append(f"  Pulling with strategy: {strategy}")
+        ret, output = run_git(repo_path, 'pull', '--no-rebase', f'--strategy-option={strategy}')
+        if ret == 0:
+            logs.append("  ✓ Pull complete.")
+
+            # Add and commit any changes
+            run_git(repo_path, 'add', '.')
+            ret, _ = run_git(repo_path, 'diff-index', '--quiet', '--cached', 'HEAD', '--')
+            if ret != 0:
+                logs.append("  Found changes, committing with default message 'fixes'...")
+                ret, _ = run_git(repo_path, 'commit', '-q', '-m', 'fixes')
+                if ret == 0:
+                    logs.append("  ✓ Commit complete.")
+
+            # Push
+            logs.append("  Pushing changes...")
+            ret, _ = run_git(repo_path, 'push')
+            if ret == 0:
+                logs.append("  ✓ Push complete.")
+            else:
+                logs.append("  ✗ Push failed.")
+        else:
+            logs.append(f"  ✗ Pull failed: {output[:200]}")
+
+    elif action == 'push':
+        run_git(repo_path, 'add', '.')
+        ret, _ = run_git(repo_path, 'diff-index', '--quiet', '--cached', 'HEAD', '--')
         if ret != 0:
-            return f"{Colors.RED}! No Remote{Colors.RESET}"
+            logs.append("  Found changes, committing with default message 'fixes'...")
+            ret, _ = run_git(repo_path, 'commit', '-q', '-m', 'fixes')
+            if ret == 0:
+                logs.append("  ✓ Commit complete.")
 
-        ret, unpushed_out = self.run_git(repo_dir, 'log', '@{{u}}..', '--oneline')
+        logs.append("  Pushing changes...")
+        ret, _ = run_git(repo_path, 'push')
+        if ret == 0:
+            logs.append("  ✓ Push complete.")
+        else:
+            logs.append("  ✗ Push failed.")
+
+    elif action == 'pull':
+        # Commit uncommitted changes
+        ret, _ = run_git(repo_path, 'diff-index', '--quiet', 'HEAD', '--')
+        if ret != 0:
+            logs.append("  Found uncommitted changes, committing before pull...")
+            run_git(repo_path, 'add', '.')
+            ret, _ = run_git(repo_path, 'commit', '-q', '-m', 'Auto-commit before pull')
+            if ret == 0:
+                logs.append("  ✓ Changes committed.")
+
+        logs.append(f"  Pulling with strategy: {strategy}")
+        ret, output = run_git(repo_path, 'pull', '--no-rebase', f'--strategy-option={strategy}')
+        if ret == 0:
+            logs.append("  ✓ Pull complete.")
+        else:
+            logs.append(f"  ✗ Pull failed: {output[:200]}")
+
+    elif action == 'status':
+        logs.append(f"  Checking '{repo_dir}'")
+
+        # Check for uncommitted changes
+        ret, _ = run_git(repo_path, 'diff-index', '--quiet', 'HEAD', '--')
+        if ret != 0:
+            logs.append("  ⚠ Has uncommitted changes")
+            _, status_output = run_git(repo_path, 'status', '--short')
+            for line in status_output.strip().split('\n')[:5]:
+                logs.append(f"    {line}")
+        else:
+            logs.append("  ✓ Working tree clean")
+
+        # Check for unpushed commits
+        ret, unpushed_out = run_git(repo_path, 'log', '@{u}..', '--oneline')
         unpushed = len(unpushed_out.strip().split('\n')) if unpushed_out.strip() else 0
-        
-        self.run_git(repo_dir, 'fetch', '--quiet')
-        ret, unpulled_out = self.run_git(repo_dir, 'log', 'HEAD..@{u}', '--oneline')
-        unpulled = len(unpulled_out.strip().split('\n')) if unpulled_out.strip() else 0
-
-        if unpushed > 0 and unpulled > 0:
-            return f"{Colors.RED}↕ {unpushed}↑ {unpulled}↓{Colors.RESET}"
         if unpushed > 0:
-            return f"{Colors.YELLOW}↑ {unpushed}{Colors.RESET}"
-        if unpulled > 0:
-            return f"{Colors.YELLOW}↓ {unpulled}{Colors.RESET}"
+            logs.append(f"  ⚠ Has {unpushed} unpushed commit(s)")
+        else:
+            ret, _ = run_git(repo_path, 'rev-parse', '@{u}')
+            if ret == 0:
+                logs.append("  ✓ All commits pushed")
+            else:
+                logs.append("  ⚠ Branch does not track a remote")
 
-        return f"{Colors.GREEN}✓ OK{Colors.RESET}"
+    elif action == 'fetch':
+        logs.append(f"  Fetching in '{repo_dir}'...")
+        ret, _ = run_git(repo_path, 'fetch')
+        if ret == 0:
+            logs.append("  ✓ Fetch complete.")
+        else:
+            logs.append("  ✗ Fetch failed.")
 
+    elif action == 'untracked':
+        logs.append(f"  Checking '{repo_dir}'")
+        _, untracked_output = run_git(repo_path, 'ls-files', '--others', '--exclude-standard')
+        if untracked_output.strip():
+            untracked_files = untracked_output.strip().split('\n')
+            logs.append(f"  ⚠ Has {len(untracked_files)} untracked file(s)")
+            for f in untracked_files[:10]:
+                logs.append(f"    {f}")
+        else:
+            logs.append("  ✓ No untracked files")
 
-# --- Git Functions (CLI) ---
-def get_repo_status_cli(repo_dir: str) -> str:
-    """Get local repository status for CLI"""
-    if not Path(repo_dir).is_dir():
-        return f"{Colors.YELLOW}Not Cloned{Colors.RESET}"
-    return f"{Colors.GREEN}OK{Colors.RESET}"
+    elif action == 'ignored':
+        logs.append(f"  Checking '{repo_dir}'")
+        _, ignored_output = run_git(repo_path, 'ls-files', '--others', '--ignored', '--exclude-standard')
+        if ignored_output.strip():
+            ignored_files = ignored_output.strip().split('\n')
+            logs.append(f"  ⚠ Has {len(ignored_files)} ignored file(s)")
+            for f in ignored_files[:10]:
+                logs.append(f"    {f}")
+        else:
+            logs.append("  ✓ No ignored files")
 
-def get_repo_fetch_status_cli(repo_dir: str) -> str:
-    """Get remote fetch status for CLI"""
-    if not Path(repo_dir).is_dir():
-        return f"{Colors.YELLOW}Not Cloned{Colors.RESET}"
-    return f"{Colors.GREEN}Up to Date{Colors.RESET}"
-
-def process_repo(repo_dir: str, repo_url: str, strategy: str, action: str):
-    """Process a repository with given action"""
-    log(f"Processing '{repo_dir}'")
-    if not Path(repo_dir).is_dir():
-        log(f"Cloning '{repo_dir}'...")
-        success("Clone complete.")
-    else:
-        success(f"{action} complete.")
-    print()
-
-# --- CLI Actions ---
-def run_cli_sync(strategy: str = 'theirs', repos: Optional[List[str]] = None):
-    git_strategy = 'ours' if strategy == 'local' else 'theirs'
-    log(f"Starting Bidirectional Sync (Strategy: {git_strategy})")
-    repos_to_process = repos if repos else list(ALL_REPOS.keys())
-    for repo_dir in repos_to_process:
-        repo_url = ALL_REPOS.get(repo_dir, '')
-        if repo_url:
-            process_repo(repo_dir, repo_url, git_strategy, 'sync')
-
-def run_cli_push(repos: Optional[List[str]] = None):
-    log("Starting Push")
-
-def run_cli_pull(repos: Optional[List[str]] = None):
-    log("Starting Pull")
-
-def run_cli_status(repos: Optional[List[str]] = None):
-    log("Checking Status")
-
-def run_cli_untracked(repos: Optional[List[str]] = None):
-    log("Checking Untracked")
-
-def run_cli_ignored(repos: Optional[List[str]] = None):
-    log("Checking Ignored")
-
-def run_cli_fetch(repos: Optional[List[str]] = None):
-    log("Fetching")
+    return logs
 
 # --- TUI Implementation ---
-
-class Panel:
-    def __init__(self, stdscr, y, x, h, w, title):
-        self.win = curses.newwin(h, w, y, x)
-        self.title = title
-        self.h, self.w = h, w
-    
-    def draw(self):
-        self.win.clear()
-        self.win.border()
-        self.win.addstr(0, 2, f" {self.title} ", curses.A_BOLD)
-        self.win.refresh()
-
-class RepoPanel(Panel):
-    def __init__(self, stdscr, y, x, h, w, title):
-        super().__init__(stdscr, y, x, h, w, title)
-        self.cursor_pos = 0
-        self.scroll_offset = 0
-
-    def draw(self, repo_data, repos):
-        super().draw()
-        max_lines = self.h - 2
-        
-        for i in range(max_lines):
-            repo_idx = self.scroll_offset + i
-            if repo_idx >= len(repos):
-                break
-            
-            repo_name = repos[repo_idx]
-            data = repo_data[repo_name]
-            
-            is_selected = data['selected']
-            status = data['status']
-            
-            marker = "[✓]" if is_selected else "[ ]"
-            
-            line = f" {marker} {repo_name}"
-            
-            attr = curses.A_NORMAL
-            if repo_idx == self.cursor_pos:
-                attr = curses.A_REVERSE
-            
-            self.win.addstr(i + 1, 2, line, attr)
-            
-            status_color = curses.color_pair(2)
-            if "✓" in status: status_color = curses.color_pair(3)
-            if "!" in status or "Δ" in status: status_color = curses.color_pair(4)
-            
-            clean_status = ''.join(c for c in status if c.isprintable())
-            for code in [Colors.RESET, Colors.BOLD, Colors.RED, Colors.GREEN, Colors.YELLOW]:
-                clean_status = clean_status.replace(code, "")
-
-            self.win.addstr(i + 1, self.w - 20, clean_status, status_color)
-
-        self.win.refresh()
-
-class LogPanel(Panel):
-    def __init__(self, stdscr, y, x, h, w, title):
-        super().__init__(stdscr, y, x, h, w, title)
-        self.logs = []
-
-    def add_log(self, message):
-        self.logs.append(message)
-    
-    def draw(self):
-        super().draw()
-        max_lines = self.h - 2
-        start_index = max(0, len(self.logs) - max_lines)
-        for i, log_message in enumerate(self.logs[start_index:]):
-            self.win.addstr(i + 1, 2, log_message[:self.w - 4])
-        self.win.refresh()
-
-class DetailPanel(Panel):
-    def __init__(self, stdscr, y, x, h, w, title):
-        super().__init__(stdscr, y, x, h, w, title)
-        self.details = "Select a repository to see details."
-
-    def set_details(self, details):
-        self.details = details
-
-    def draw(self):
-        super().draw()
-        max_lines = self.h - 2
-        for i, line in enumerate(self.details.split('\n')):
-            if i >= max_lines:
-                break
-            self.win.addstr(i + 1, 2, line[:self.w - 4])
-        self.win.refresh()
 
 class TUI:
     def __init__(self, stdscr):
         self.stdscr = stdscr
         self.running = True
-        
-        self.repos = sorted(ALL_REPOS.keys())
-        self.repo_data = {
-            repo: {'selected': True, 'status': "Scanning..."} for repo in self.repos
-        }
-        self.work_dir = "/home/diego/Documents/Git"
-        self.strategy = 'theirs'
 
-        self.task_queue = queue.Queue()
-        self.result_queue = queue.Queue()
-        self.worker = GitWorker(self.task_queue, self.result_queue)
-        self.worker.start()
-        
+        # State variables
+        self.repos = sorted(ALL_REPOS.keys())
+        self.repo_selection = [True] * len(self.repos)
+        self.repo_local_status = ["Not Checked"] * len(self.repos)
+        self.repo_remote_status = ["Not Checked"] * len(self.repos)
+
+        self.workdir_selected = 1  # 0=current dir, 1=custom path
+        self.workdir_path = "/home/diego/Documents/Git"
+        self.strategy_selected = 1  # 0=local (ours), 1=remote (theirs)
+        self.action_selected = 0  # 0=sync, 1=push, 2=pull, 3=status, 4=fetch, 5=untracked, 6=ignored
+        self.repo_cursor = 0
+        self.repo_scroll_offset = 0  # For scrolling through repos
+        self.current_field = 0  # 0=workdir, 1=strategy, 2=action, 3=repos, 4=run
+        self.total_fields = 5
+        self.status_message = ""  # For showing refresh status
+
+        # Initialize curses
         curses.curs_set(0)
         if curses.has_colors():
             curses.start_color()
             curses.init_pair(1, curses.COLOR_CYAN, curses.COLOR_BLACK)
-            curses.init_pair(2, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+            curses.init_pair(2, curses.COLOR_BLUE, curses.COLOR_BLACK)
             curses.init_pair(3, curses.COLOR_GREEN, curses.COLOR_BLACK)
             curses.init_pair(4, curses.COLOR_RED, curses.COLOR_BLACK)
-            curses.init_pair(5, curses.COLOR_BLACK, curses.COLOR_WHITE) # Help bar
+            curses.init_pair(5, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+            curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_CYAN)  # Highlight
+            curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_GREEN)  # Run button
 
-        self.init_layout()
-        self.scan_all_repos()
-        self.update_detail_panel()
+        # Do a quick local status scan on startup
+        self.refresh_local_status()
 
-    def scan_all_repos(self):
-        for repo in self.repos:
-            self.task_queue.put(('get_status', (repo, self.work_dir)))
+    def refresh_local_status(self):
+        """Refresh local repository status (fast, no remote fetch)"""
+        work_dir = "." if self.workdir_selected == 0 else self.workdir_path
+        if not Path(work_dir).is_dir():
+            return
 
-    def update_detail_panel(self):
-        repo_name = self.repos[self.repo_panel.cursor_pos]
-        self.detail_panel.set_details(f"Loading details for {repo_name}...")
-        self.task_queue.put(('get_detail', (repo_name, self.work_dir)))
+        for i, repo in enumerate(self.repos):
+            self.status_message = f"Refreshing local status... ({i+1}/{len(self.repos)})"
+            self.draw()  # Update display during refresh
+            repo_path = str(Path(work_dir) / repo)
+            self.repo_local_status[i] = get_repo_local_status(repo_path)
 
-    def init_layout(self):
-        h, w = self.stdscr.getmaxyx()
-        log_h = 10
-        detail_w = 60
-        repo_w = w - detail_w
-        self.repo_panel = RepoPanel(self.stdscr, 1, 0, h - log_h - 2, repo_w, "Repositories")
-        self.detail_panel = DetailPanel(self.stdscr, 1, repo_w, h - log_h - 2, detail_w, "Details")
-        self.log_panel = LogPanel(self.stdscr, h - log_h -1, 0, log_h, w, "Log")
+        self.status_message = ""
 
-    def draw_help(self):
-        h, w = self.stdscr.getmaxyx()
-        help_text = " (q)uit | (a)ll | (u)nselect | (r)efresh | (s)ync | (p)ush | (l)pull "
-        self.stdscr.addstr(h - 1, 0, help_text, curses.color_pair(5))
+    def refresh_remote_status(self):
+        """Refresh remote repository status (slow, does fetch)"""
+        work_dir = "." if self.workdir_selected == 0 else self.workdir_path
+        if not Path(work_dir).is_dir():
+            return
+
+        for i, repo in enumerate(self.repos):
+            self.status_message = f"Fetching remote status... ({i+1}/{len(self.repos)})"
+            self.draw()  # Update display during refresh
+            repo_path = str(Path(work_dir) / repo)
+            self.repo_remote_status[i] = get_repo_remote_status(repo_path)
+
+        self.status_message = ""
 
     def draw(self):
+        """Draw the entire interface"""
         self.stdscr.clear()
-        self.stdscr.addstr(0, 2, "gcl.py - Git Sync Manager", curses.color_pair(1) | curses.A_BOLD)
-        self.draw_help()
+        h, w = self.stdscr.getmaxyx()
+
+        row = 0
+
+        # Title
+        title = "╔══════════════════════════════════════════╗"
+        self.stdscr.addstr(row, 2, title, curses.color_pair(1) | curses.A_BOLD)
+        row += 1
+        self.stdscr.addstr(row, 2, "║ gcl.py - Git Sync Manager               ║", curses.color_pair(1) | curses.A_BOLD)
+        row += 1
+        self.stdscr.addstr(row, 2, "╚══════════════════════════════════════════╝", curses.color_pair(1) | curses.A_BOLD)
+        row += 2
+
+        # Working Directory
+        self.stdscr.addstr(row, 2, "WORKING DIRECTORY:", curses.color_pair(2) | curses.A_BOLD)
+        row += 1
+        self.stdscr.addstr(row, 2, "══════════════════", curses.color_pair(2))
+        row += 1
+
+        opt0 = f"[{'●' if self.workdir_selected == 0 else ' '}] Current Directory (.)"
+        attr0 = curses.color_pair(6) if self.current_field == 0 and self.workdir_selected == 0 else curses.A_NORMAL
+        self.stdscr.addstr(row, 4, opt0, attr0)
+        row += 1
+
+        opt1 = f"[{'●' if self.workdir_selected == 1 else ' '}] Custom Path: {self.workdir_path}"
+        attr1 = curses.color_pair(6) if self.current_field == 0 and self.workdir_selected == 1 else curses.A_NORMAL
+        self.stdscr.addstr(row, 4, opt1, attr1)
+        row += 3
+
+        # Merge Strategy
+        self.stdscr.addstr(row, 2, "MERGE STRATEGY (On Conflict):", curses.color_pair(2) | curses.A_BOLD)
+        row += 1
+        self.stdscr.addstr(row, 2, "══════════════════════════════", curses.color_pair(2))
+        row += 1
+
+        # Strategy 0: LOCAL with 'O' highlighted
+        marker0 = '●' if self.strategy_selected == 0 else ' '
+        attr_s0 = curses.color_pair(6) if self.current_field == 1 and self.strategy_selected == 0 else curses.A_NORMAL
+        if self.current_field == 1 and self.strategy_selected == 0:
+            self.stdscr.addstr(row, 4, f"[{marker0}] LOCAL  (Keep local changes)", attr_s0)
+        else:
+            self.stdscr.addstr(row, 4, f"[{marker0}] L")
+            self.stdscr.addstr(row, 8, "O", curses.color_pair(5) | curses.A_BOLD)
+            self.stdscr.addstr(row, 9, "CAL  (Keep local changes)")
+        row += 1
+
+        # Strategy 1: REMOTE with 'E' highlighted
+        marker1 = '●' if self.strategy_selected == 1 else ' '
+        attr_s1 = curses.color_pair(6) if self.current_field == 1 and self.strategy_selected == 1 else curses.A_NORMAL
+        if self.current_field == 1 and self.strategy_selected == 1:
+            self.stdscr.addstr(row, 4, f"[{marker1}] REMOTE (Overwrite with remote)", attr_s1)
+        else:
+            self.stdscr.addstr(row, 4, f"[{marker1}] R")
+            self.stdscr.addstr(row, 8, "E", curses.color_pair(5) | curses.A_BOLD)
+            self.stdscr.addstr(row, 9, "MOTE (Overwrite with remote)")
+        row += 3
+
+        # Action
+        self.stdscr.addstr(row, 2, "ACTION:", curses.color_pair(2) | curses.A_BOLD)
+        row += 1
+        self.stdscr.addstr(row, 2, "═══════", curses.color_pair(2))
+        row += 1
+
+        # Actions with highlighted shortcut letters
+        actions_data = [
+            (0, "SYNC   (Remote <-> Local)", "S", 0),
+            (1, "PUSH   (Local -> Remote)", "P", 0),
+            (2, "PULL   (Remote -> Local)", "PU", "L", "L (Remote -> Local)"),
+            (None, None, None, None),  # blank line
+            (3, "STATUS (Check repos)", "S", "T", "ATUS (Check repos)"),
+            (4, "FETCH  (Fetch from remote)", "F", 0),
+            (5, "UNTRACKED (List untracked files)", "U", "N", "TRACKED (List untracked files)"),
+            (6, "IGNORED (List ignored files)", "I", 0),
+        ]
+
+        for action_info in actions_data:
+            if action_info[0] is None:  # blank line
+                row += 1
+                continue
+
+            action_idx = action_info[0]
+            marker = '●' if self.action_selected == action_idx else ' '
+            attr = curses.color_pair(6) if self.current_field == 2 and self.action_selected == action_idx else curses.A_NORMAL
+
+            # If this action is currently selected, use solid highlight
+            if self.current_field == 2 and self.action_selected == action_idx:
+                self.stdscr.addstr(row, 4, f"[{marker}] {action_info[1]}", attr)
+            else:
+                # Draw with highlighted shortcut letter
+                if action_idx == 0:  # SYNC
+                    self.stdscr.addstr(row, 4, f"[{marker}] ")
+                    self.stdscr.addstr(row, 8, "S", curses.color_pair(5) | curses.A_BOLD)
+                    self.stdscr.addstr(row, 9, "YNC   (Remote <-> Local)")
+                elif action_idx == 1:  # PUSH
+                    self.stdscr.addstr(row, 4, f"[{marker}] ")
+                    self.stdscr.addstr(row, 8, "P", curses.color_pair(5) | curses.A_BOLD)
+                    self.stdscr.addstr(row, 9, "USH   (Local -> Remote)")
+                elif action_idx == 2:  # PULL
+                    self.stdscr.addstr(row, 4, f"[{marker}] PU")
+                    self.stdscr.addstr(row, 10, "L", curses.color_pair(5) | curses.A_BOLD)
+                    self.stdscr.addstr(row, 11, "L   (Remote -> Local)")
+                elif action_idx == 3:  # STATUS
+                    self.stdscr.addstr(row, 4, f"[{marker}] S")
+                    self.stdscr.addstr(row, 9, "T", curses.color_pair(5) | curses.A_BOLD)
+                    self.stdscr.addstr(row, 10, "ATUS (Check repos)")
+                elif action_idx == 4:  # FETCH
+                    self.stdscr.addstr(row, 4, f"[{marker}] ")
+                    self.stdscr.addstr(row, 8, "F", curses.color_pair(5) | curses.A_BOLD)
+                    self.stdscr.addstr(row, 9, "ETCH  (Fetch from remote)")
+                elif action_idx == 5:  # UNTRACKED
+                    self.stdscr.addstr(row, 4, f"[{marker}] U")
+                    self.stdscr.addstr(row, 9, "N", curses.color_pair(5) | curses.A_BOLD)
+                    self.stdscr.addstr(row, 10, "TRACKED (List untracked files)")
+                elif action_idx == 6:  # IGNORED
+                    self.stdscr.addstr(row, 4, f"[{marker}] ")
+                    self.stdscr.addstr(row, 8, "I", curses.color_pair(5) | curses.A_BOLD)
+                    self.stdscr.addstr(row, 9, "GNORED (List ignored files)")
+            row += 1
+
+        row += 2
+
+        # Repositories
+        repo_start_row = row
+        self.stdscr.addstr(row, 2, "REPOSITORIES (Toggle with SPACE):", curses.color_pair(2) | curses.A_BOLD)
+        self.stdscr.addstr(row, 40, "LOCAL STATUS:", curses.color_pair(2) | curses.A_BOLD)
+        self.stdscr.addstr(row, 60, "REMOTE STATUS:", curses.color_pair(2) | curses.A_BOLD)
+        row += 1
+        self.stdscr.addstr(row, 2, "═════════════════════════════════", curses.color_pair(2))
+        self.stdscr.addstr(row, 40, "═════════════", curses.color_pair(2))
+        self.stdscr.addstr(row, 60, "══════════════", curses.color_pair(2))
+        row += 1
+
+        max_visible_repos = min(14, h - row - 10)  # Show up to 14 repos
+
+        # Display repos with scrolling support
+        for i in range(max_visible_repos):
+            repo_idx = self.repo_scroll_offset + i
+            if repo_idx >= len(self.repos):
+                break
+
+            marker = "✓" if self.repo_selection[repo_idx] else " "
+            repo_line = f"[{marker}] {self.repos[repo_idx]:<30}"
+
+            local_status = self.repo_local_status[repo_idx]
+            remote_status = self.repo_remote_status[repo_idx]
+
+            # Determine color for local status
+            local_color = curses.A_NORMAL
+            if "OK" in local_status:
+                local_color = curses.color_pair(3)
+            elif "Not Cloned" in local_status or "Uncommitted" in local_status or "Unpushed" in local_status:
+                local_color = curses.color_pair(4)
+            elif "No Remote" in local_status:
+                local_color = curses.color_pair(4)
+
+            # Determine color for remote status
+            remote_color = curses.A_NORMAL
+            if "Up to Date" in remote_status:
+                remote_color = curses.color_pair(3)
+            elif "Not Cloned" in remote_status or "To Pull" in remote_status or "Fetch Failed" in remote_status:
+                remote_color = curses.color_pair(4)
+            elif "Not Checked" in remote_status:
+                remote_color = curses.color_pair(5)
+
+            if self.current_field == 3 and repo_idx == self.repo_cursor:
+                self.stdscr.addstr(row, 4, repo_line, curses.color_pair(6))
+                self.stdscr.addstr(row, 40, f"{local_status:<18}", curses.color_pair(6))
+                self.stdscr.addstr(row, 60, remote_status, curses.color_pair(6))
+            else:
+                self.stdscr.addstr(row, 4, repo_line)
+                self.stdscr.addstr(row, 40, f"{local_status:<18}", local_color)
+                self.stdscr.addstr(row, 60, remote_status, remote_color)
+            row += 1
+
+        row += 1
+
+        # RUN button
+        run_text = "   [ RUN ]   "
+        run_attr = curses.color_pair(7) | curses.A_BOLD if self.current_field == 4 else curses.A_BOLD
+        self.stdscr.addstr(row, 2, run_text, run_attr)
+        row += 3
+
+        # Status message (if refreshing)
+        if self.status_message:
+            row += 1
+            self.stdscr.addstr(row, 2, self.status_message, curses.color_pair(5) | curses.A_BOLD)
+            row += 1
+
+        # Help text
+        row = h - 8
+        self.stdscr.addstr(row, 2, "KEYBOARD SHORTCUTS", curses.color_pair(2) | curses.A_BOLD)
+        row += 1
+        self.stdscr.addstr(row, 2, "═══════════════════", curses.color_pair(2))
+        row += 1
+
+        # Navigate line
+        col = 2
+        self.stdscr.addstr(row, col, "Navigate: (", curses.A_BOLD)
+        col += 11
+        self.stdscr.addstr(row, col, "↑", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, "/", curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, "↓", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, ") List | (")
+        col += 10
+        self.stdscr.addstr(row, col, "TAB", curses.color_pair(5) | curses.A_BOLD)
+        col += 3
+        self.stdscr.addstr(row, col, ") Field | (")
+        col += 11
+        self.stdscr.addstr(row, col, "SPACE", curses.color_pair(5) | curses.A_BOLD)
+        col += 5
+        self.stdscr.addstr(row, col, ") Toggle | (")
+        col += 12
+        self.stdscr.addstr(row, col, "ENTER", curses.color_pair(5) | curses.A_BOLD)
+        col += 5
+        self.stdscr.addstr(row, col, ") Run | (")
+        col += 9
+        self.stdscr.addstr(row, col, "q", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, ") Quit")
+        row += 1
+
+        # Select line
+        col = 2
+        self.stdscr.addstr(row, col, "Select:   (", curses.A_BOLD)
+        col += 11
+        self.stdscr.addstr(row, col, "a", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, ") All | (")
+        col += 9
+        self.stdscr.addstr(row, col, "u", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, ") None | (")
+        col += 10
+        self.stdscr.addstr(row, col, "k", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, ") Not OK")
+        row += 1
+
+        # Strategy line
+        col = 2
+        self.stdscr.addstr(row, col, "Strategy: (", curses.A_BOLD)
+        col += 11
+        self.stdscr.addstr(row, col, "o", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, ") Local | (")
+        col += 11
+        self.stdscr.addstr(row, col, "e", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, ") Remote")
+        row += 1
+
+        # Actions line
+        col = 2
+        self.stdscr.addstr(row, col, "Actions:  (", curses.A_BOLD)
+        col += 11
+        self.stdscr.addstr(row, col, "s", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, ") Sync | (")
+        col += 10
+        self.stdscr.addstr(row, col, "p", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, ") Push | (")
+        col += 10
+        self.stdscr.addstr(row, col, "l", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, ") Pull | (")
+        col += 10
+        self.stdscr.addstr(row, col, "f", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, ") Fetch")
+        row += 1
+
+        # Actions continued line
+        col = 12
+        self.stdscr.addstr(row, col, "(")
+        col += 1
+        self.stdscr.addstr(row, col, "n", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, ") Untracked | (")
+        col += 15
+        self.stdscr.addstr(row, col, "t", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, ") Status | (")
+        col += 12
+        self.stdscr.addstr(row, col, "r", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, ") Refresh")
+
         self.stdscr.refresh()
-        self.repo_panel.draw(self.repo_data, self.repos)
-        self.detail_panel.draw()
-        self.log_panel.draw()
 
     def handle_input(self, key):
+        """Handle keyboard input"""
         if key == ord('q'):
             self.running = False
-        elif key == curses.KEY_UP:
-            if self.repo_panel.cursor_pos > 0:
-                self.repo_panel.cursor_pos -= 1
-                self.update_detail_panel()
-        elif key == curses.KEY_DOWN:
-            if self.repo_panel.cursor_pos < len(self.repos) - 1:
-                self.repo_panel.cursor_pos += 1
-                self.update_detail_panel()
-        elif key == ord(' '):
-            repo_name = self.repos[self.repo_panel.cursor_pos]
-            self.repo_data[repo_name]['selected'] = not self.repo_data[repo_name]['selected']
-        elif key == ord('a'):
-            for repo in self.repos:
-                self.repo_data[repo]['selected'] = True
-        elif key == ord('u'):
-            for repo in self.repos:
-                self.repo_data[repo]['selected'] = False
-        elif key == ord('r'):
-            self.scan_all_repos()
-        elif key == ord('s'):
-            for repo, data in self.repo_data.items():
-                if data['selected']:
-                    self.task_queue.put(('sync', (repo, self.work_dir, self.strategy)))
-        elif key == ord('p'):
-            for repo, data in self.repo_data.items():
-                if data['selected']:
-                    self.task_queue.put(('push', (repo, self.work_dir, self.strategy)))
-        elif key == ord('l'):
-            for repo, data in self.repo_data.items():
-                if data['selected']:
-                    self.task_queue.put(('pull', (repo, self.work_dir, self.strategy)))
 
-    def update(self):
+        elif key == curses.KEY_UP:
+            if self.current_field == 3:  # In repo list
+                self.repo_cursor = max(0, self.repo_cursor - 1)
+                # Adjust scroll offset if cursor goes above visible area
+                if self.repo_cursor < self.repo_scroll_offset:
+                    self.repo_scroll_offset = self.repo_cursor
+            else:
+                self.current_field = (self.current_field - 1) % self.total_fields
+
+        elif key == curses.KEY_DOWN:
+            if self.current_field == 3:  # In repo list
+                self.repo_cursor = min(len(self.repos) - 1, self.repo_cursor + 1)
+                # Adjust scroll offset if cursor goes below visible area
+                h, w = self.stdscr.getmaxyx()
+                max_visible = min(14, h - 30)
+                if self.repo_cursor >= self.repo_scroll_offset + max_visible:
+                    self.repo_scroll_offset = self.repo_cursor - max_visible + 1
+            else:
+                self.current_field = (self.current_field + 1) % self.total_fields
+
+        elif key == ord('\t') or key == 9:  # TAB
+            self.current_field = (self.current_field + 1) % self.total_fields
+
+        elif key == ord(' '):  # SPACE
+            if self.current_field == 0:  # Toggle workdir
+                self.workdir_selected = 1 - self.workdir_selected
+            elif self.current_field == 1:  # Toggle strategy
+                self.strategy_selected = 1 - self.strategy_selected
+            elif self.current_field == 2:  # Cycle action
+                self.action_selected = (self.action_selected + 1) % 7
+            elif self.current_field == 3:  # Toggle repo selection
+                self.repo_selection[self.repo_cursor] = not self.repo_selection[self.repo_cursor]
+
+        elif key == ord('\n') or key == ord('\r') or key == 10 or key == 13:  # ENTER
+            self.execute_action()
+
+        # Shortcuts
+        elif key == ord('a'):  # Select all
+            self.repo_selection = [True] * len(self.repos)
+
+        elif key == ord('u'):  # Unselect all
+            self.repo_selection = [False] * len(self.repos)
+
+        elif key == ord('k'):  # Select not OK
+            for i in range(len(self.repos)):
+                if self.repo_local_status[i] != "OK":
+                    self.repo_selection[i] = True
+                else:
+                    self.repo_selection[i] = False
+
+        elif key == ord('o'):  # Local strategy
+            self.strategy_selected = 0
+
+        elif key == ord('e'):  # Remote strategy
+            self.strategy_selected = 1
+
+        elif key == ord('s'):  # Sync action
+            self.action_selected = 0
+
+        elif key == ord('p'):  # Push action
+            self.action_selected = 1
+
+        elif key == ord('l'):  # Pull action
+            self.action_selected = 2
+
+        elif key == ord('t'):  # Status action
+            self.action_selected = 3
+            self.refresh_local_status()
+
+        elif key == ord('f'):  # Fetch action
+            self.action_selected = 4
+            self.refresh_remote_status()
+
+        elif key == ord('n'):  # Untracked action
+            self.action_selected = 5
+
+        elif key == ord('i'):  # Ignored action
+            self.action_selected = 6
+
+        elif key == ord('r'):  # Refresh
+            self.refresh_local_status()
+            self.refresh_remote_status()
+
+    def execute_action(self):
+        """Execute the selected action on selected repos"""
+        # Restore terminal for command output
+        curses.endwin()
+
+        print("═" * 60)
+        print("                  Executing Actions...                      ")
+        print("═" * 60)
+        print()
+
+        work_dir = "." if self.workdir_selected == 0 else self.workdir_path
+
+        if not Path(work_dir).is_dir():
+            error(f"Working directory does not exist: {work_dir}")
+            print("\nPress Enter to return to menu...")
+            input()
+            self.stdscr = curses.initscr()
+            return
+
+        strategy = 'ours' if self.strategy_selected == 0 else 'theirs'
+        action_names = ['sync', 'push', 'pull', 'status', 'fetch', 'untracked', 'ignored']
+        action = action_names[self.action_selected]
+
+        selected_repos = [self.repos[i] for i in range(len(self.repos)) if self.repo_selection[i]]
+
+        if not selected_repos:
+            warn("No repositories selected. Nothing to do.")
+        else:
+            for repo_name in selected_repos:
+                repo_url = ALL_REPOS.get(repo_name, '')
+                logs = process_repo(repo_name, repo_url, strategy, action, work_dir)
+                for log_msg in logs:
+                    print(log_msg)
+                print()
+
+        # Refresh statuses after execution
+        print("\nRefreshing repository statuses...")
+        self.refresh_local_status()
+
+        print("\n═" * 60)
+        print("                  All tasks complete!                       ")
+        print("═" * 60)
+        print("\nPress 'q' to quit or any other key to return to menu...")
+
+        # Get user input
+        import sys
+        import tty
+        import termios
+
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
         try:
-            result_type, data = self.result_queue.get_nowait()
-            if result_type == 'status':
-                repo_name, status = data
-                if repo_name in self.repo_data:
-                    self.repo_data[repo_name]['status'] = status
-            elif result_type == 'log':
-                self.log_panel.add_log(data)
-            elif result_type == 'detail':
-                self.detail_panel.set_details(data)
-            self.result_queue.task_done()
-        except queue.Empty:
-            pass
+            tty.setraw(fd)
+            ch = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+        if ch == 'q' or ch == 'Q':
+            self.running = False
+        else:
+            # Reinitialize curses
+            self.stdscr = curses.initscr()
+            curses.curs_set(0)
+            if curses.has_colors():
+                curses.start_color()
+                curses.init_pair(1, curses.COLOR_CYAN, curses.COLOR_BLACK)
+                curses.init_pair(2, curses.COLOR_BLUE, curses.COLOR_BLACK)
+                curses.init_pair(3, curses.COLOR_GREEN, curses.COLOR_BLACK)
+                curses.init_pair(4, curses.COLOR_RED, curses.COLOR_BLACK)
+                curses.init_pair(5, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+                curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_CYAN)
+                curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_GREEN)
 
     def run(self):
-        self.stdscr.nodelay(True)
+        """Main TUI loop"""
         while self.running:
-            self.update()
             self.draw()
             key = self.stdscr.getch()
             if key != -1:
                 self.handle_input(key)
-            curses.napms(50)
 
 def run_tui(stdscr):
     TUI(stdscr).run()
+
+# --- CLI Actions ---
+def run_cli_sync(strategy: str = 'remote', repos: Optional[List[str]] = None, work_dir: str = "."):
+    git_strategy = 'ours' if strategy == 'local' else 'theirs'
+    log(f"Starting Bidirectional Sync (Strategy: {git_strategy})")
+    repos_to_process = repos if repos else list(ALL_REPOS.keys())
+    for repo_name in repos_to_process:
+        repo_url = ALL_REPOS.get(repo_name, '')
+        if repo_url:
+            logs = process_repo(repo_name, repo_url, git_strategy, 'sync', work_dir)
+            for log_msg in logs:
+                print(log_msg)
+            print()
+
+def run_cli_push(repos: Optional[List[str]] = None, work_dir: str = "."):
+    log("Starting Push")
+    repos_to_process = repos if repos else list(ALL_REPOS.keys())
+    for repo_name in repos_to_process:
+        repo_url = ALL_REPOS.get(repo_name, '')
+        if repo_url:
+            logs = process_repo(repo_name, repo_url, 'theirs', 'push', work_dir)
+            for log_msg in logs:
+                print(log_msg)
+            print()
+
+def run_cli_pull(repos: Optional[List[str]] = None, work_dir: str = "."):
+    log("Starting Pull")
+    repos_to_process = repos if repos else list(ALL_REPOS.keys())
+    for repo_name in repos_to_process:
+        repo_url = ALL_REPOS.get(repo_name, '')
+        if repo_url:
+            logs = process_repo(repo_name, repo_url, 'theirs', 'pull', work_dir)
+            for log_msg in logs:
+                print(log_msg)
+            print()
+
+def run_cli_status(repos: Optional[List[str]] = None, work_dir: str = "."):
+    log("Checking Status")
+    repos_to_process = repos if repos else list(ALL_REPOS.keys())
+    for repo_name in repos_to_process:
+        repo_url = ALL_REPOS.get(repo_name, '')
+        if repo_url:
+            logs = process_repo(repo_name, repo_url, 'theirs', 'status', work_dir)
+            for log_msg in logs:
+                print(log_msg)
+            print()
+
+def run_cli_untracked(repos: Optional[List[str]] = None, work_dir: str = "."):
+    log("Listing Untracked Files")
+    repos_to_process = repos if repos else list(ALL_REPOS.keys())
+    for repo_name in repos_to_process:
+        repo_url = ALL_REPOS.get(repo_name, '')
+        if repo_url:
+            logs = process_repo(repo_name, repo_url, 'theirs', 'untracked', work_dir)
+            for log_msg in logs:
+                print(log_msg)
+            print()
+
+def run_cli_ignored(repos: Optional[List[str]] = None, work_dir: str = "."):
+    log("Listing Ignored Files")
+    repos_to_process = repos if repos else list(ALL_REPOS.keys())
+    for repo_name in repos_to_process:
+        repo_url = ALL_REPOS.get(repo_name, '')
+        if repo_url:
+            logs = process_repo(repo_name, repo_url, 'theirs', 'ignored', work_dir)
+            for log_msg in logs:
+                print(log_msg)
+            print()
+
+def run_cli_fetch(repos: Optional[List[str]] = None, work_dir: str = "."):
+    log("Fetching")
+    repos_to_process = repos if repos else list(ALL_REPOS.keys())
+    for repo_name in repos_to_process:
+        repo_url = ALL_REPOS.get(repo_name, '')
+        if repo_url:
+            logs = process_repo(repo_name, repo_url, 'theirs', 'fetch', work_dir)
+            for log_msg in logs:
+                print(log_msg)
+            print()
 
 def main():
     """Main entry point for CLI and TUI"""
@@ -500,14 +953,14 @@ def is_git_installed():
 
 if __name__ == "__main__":
     try:
-        if "xterm" not in os.environ.get("TERM", ""):
-            print(f"{Colors.YELLOW}Warning: Your terminal may not fully support this TUI. For best results, use an xterm-compatible terminal.{Colors.RESET}")
         if not is_git_installed():
             print(f"{Colors.RED}Error: 'git' command not found. Please install Git and ensure it's in your PATH.{Colors.RESET}")
             sys.exit(1)
         main()
+    except KeyboardInterrupt:
+        print("\n\nInterrupted by user")
+        sys.exit(0)
     except Exception as e:
         print(f"{Colors.RED}Application crashed unexpectedly: {e}{Colors.RESET}")
-        # For debugging, you might want to see the full traceback
-        # import traceback
-        # traceback.print_exc()
+        import traceback
+        traceback.print_exc()
