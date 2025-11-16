@@ -179,7 +179,10 @@ process_repo() {
 
             # --- FIX: Added --no-rebase to force a merge ---
             # This prevents "divergent branches" error and allows --strategy-option to work.
-            if git -C "$repo_dir" pull -q --no-rebase --strategy-option="$strategy"; then
+            pull_output=$(git -C "$repo_dir" pull --no-rebase --strategy-option="$strategy" 2>&1)
+            pull_status=$?
+
+            if [ $pull_status -eq 0 ]; then
             # --- END FIX ---
                 _success "Pull complete."
 
@@ -201,6 +204,42 @@ process_repo() {
                 fi
             else
                 _error "Pull failed."
+
+                # Check for specific error types and provide helpful messages
+                if echo "$pull_output" | grep -q "File name too long\|Filename too long"; then
+                    _warn "Filesystem limitation: Path/filename exceeds system limits."
+                    _warn "Attempting automatic fix..."
+
+                    # Try to enable long paths
+                    if git -C "$repo_dir" config core.longpaths true 2>/dev/null; then
+                        _success "Enabled core.longpaths for this repo."
+                        _warn "Please re-run sync/pull for this repo."
+                    else
+                        _warn "Could not auto-fix. Manual steps needed:"
+                        printf "    ${C_YELLOW}1. Run: git config core.longpaths true${C_RESET}\n"
+                        printf "    ${C_YELLOW}2. On Windows: Enable long path support in registry${C_RESET}\n"
+                        printf "    ${C_YELLOW}3. Clone to shorter path (e.g., C:\\git\\)${C_RESET}\n"
+                    fi
+                elif echo "$pull_output" | grep -q "symlink"; then
+                    _warn "Symlink creation failed. Attempting fix..."
+
+                    # Try to disable symlinks
+                    if git -C "$repo_dir" config core.symlinks false 2>/dev/null; then
+                        _success "Disabled symlinks for this repo."
+                        _warn "Please re-run sync/pull for this repo."
+                    else
+                        _warn "Try manually: git config core.symlinks false"
+                    fi
+                fi
+
+                # Abort failed merge if in progress
+                if git -C "$repo_dir" rev-parse MERGE_HEAD >/dev/null 2>&1; then
+                    _warn "Aborting failed merge..."
+                    git -C "$repo_dir" merge --abort 2>/dev/null
+                fi
+
+                printf "  ${C_YELLOW}Error details:${C_RESET}\n"
+                echo "$pull_output" | sed 's/^/    /'
             fi
             ;;
         push)
