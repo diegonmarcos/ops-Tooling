@@ -441,6 +441,8 @@ _read_key() {
         key="refresh"
     elif [ "$char" = "w" ]; then
         key="editpath"
+    elif [ "$char" = "y" ]; then
+        key="restoresymlinks"
     elif [ "$char" = "q" ]; then
         key="quit"
     fi
@@ -459,7 +461,8 @@ draw_interface() {
     printf "╚════════════════════════════════════════════════════════════════════════════════════╝${C_RESET}\n"
     printf "  Navigate: ↑/↓  Switch: TAB  Toggle: SPACE  Run: ENTER  Quit: q\n"
     printf "  Repo List:  ${C_BOLD}a${C_RESET}/${C_BOLD}u${C_RESET} (All/None)  ${C_BOLD}k${C_RESET} (Not OK)  ${C_BOLD}t${C_RESET} (Status)  ${C_BOLD}f${C_RESET} (Fetch)  ${C_BOLD}r${C_RESET} (Refresh)  ${C_BOLD}w${C_RESET} (Edit Path)\n"
-    printf "  Shortcuts:  Strategy: ${C_BOLD}o${C_RESET} (Local) ${C_BOLD}e${C_RESET} (Remote)  |  Action: ${C_BOLD}s${C_RESET} (Sync) ${C_BOLD}p${C_RESET} (Push) ${C_BOLD}l${C_RESET} (Pull) ${C_BOLD}n${C_RESET} (Untracked)\n\n\n"
+    printf "  Shortcuts:  Strategy: ${C_BOLD}o${C_RESET} (Local) ${C_BOLD}e${C_RESET} (Remote)  |  Action: ${C_BOLD}s${C_RESET} (Sync) ${C_BOLD}p${C_RESET} (Push) ${C_BOLD}l${C_RESET} (Pull) ${C_BOLD}n${C_RESET} (Untracked)\n"
+    printf "  Tools:  ${C_BOLD}y${C_RESET} (Restore 0.spec symlinks)\n\n"
 
     # --- Working Directory Selection ---
     _line=9;
@@ -883,6 +886,45 @@ run_interactive_mode() {
                     _workdir_selected=1  # Switch to custom path
                     _refresh_repo_statuses
                 fi
+                _save_term
+                stty -icanon -echo
+                ;;
+            restoresymlinks) # 'y' - Restore 0.spec symlinks
+                _restore_term
+                _clear_screen
+
+                # Get working directory
+                if [ "$_workdir_selected" -eq 0 ]; then
+                    work_dir="."
+                else
+                    work_dir="$_workdir_path"
+                fi
+
+                # Get script path (same directory as gcl.sh)
+                script_dir="$(cd "$(dirname "$0")" && pwd)"
+                symlink_script="$script_dir/restore-spec-symlinks.sh"
+
+                if [ ! -f "$symlink_script" ]; then
+                    _error "Script not found: $symlink_script"
+                    printf "\n${C_YELLOW}Press any key to return to menu...${C_RESET}\n"
+                    read -r
+                    _save_term
+                    stty -icanon -echo
+                    break
+                fi
+
+                printf "${C_BOLD}${C_CYAN}═══════════════════════════════════════════════════════════════${C_RESET}\n"
+                printf "${C_BOLD}${C_CYAN}           Restoring 0.spec Symlinks...                        ${C_RESET}\n"
+                printf "${C_BOLD}${C_CYAN}═══════════════════════════════════════════════════════════════${C_RESET}\n\n"
+
+                # Run the script
+                bash "$symlink_script" "$work_dir"
+
+                printf "\n${C_BOLD}${C_CYAN}═══════════════════════════════════════════════════════════════${C_RESET}\n"
+                printf "${C_GREEN}${C_BOLD}                  Done!                                         ${C_RESET}\n"
+                printf "${C_BOLD}${C_CYAN}═══════════════════════════════════════════════════════════════${C_RESET}\n"
+                printf "${C_YELLOW}Press any key to return to menu...${C_RESET}\n"
+                read -r
                 _save_term
                 stty -icanon -echo
                 ;;
