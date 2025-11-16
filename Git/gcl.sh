@@ -154,7 +154,11 @@ process_repo() {
 
     if ! [ -d "$repo_dir" ]; then
         _log "Cloning '$repo_dir'..."
-        if git clone -q "$repo_url" "$repo_dir"; then _success "Clone complete."; else _error "Clone failed."; fi
+        if git clone "$repo_url" "$repo_dir" 2>&1; then
+            _success "Clone complete."
+        else
+            _error "Clone failed."
+        fi
         printf "\n"; return
     fi
 
@@ -200,7 +204,11 @@ process_repo() {
                     fi
 
                     printf "  Pushing changes...\n"
-                    if git -C "$repo_dir" push -q; then _success "Push complete."; else _warn "Push failed (no changes or permissions issue)."; fi
+                    if git -C "$repo_dir" push 2>&1; then
+                        _success "Push complete."
+                    else
+                        _error "Push failed."
+                    fi
                 fi
             else
                 _error "Pull failed."
@@ -255,7 +263,11 @@ process_repo() {
                 fi
             fi
             printf "  Pushing changes...\n"
-            if git -C "$repo_dir" push -q; then _success "Push complete."; else _warn "Push failed (no changes or permissions issue)."; fi
+            if git -C "$repo_dir" push 2>&1; then
+                _success "Push complete."
+            else
+                _error "Push failed."
+            fi
             ;;
     esac
     printf "\n"
@@ -350,6 +362,40 @@ run_cli_status() {
     done
 }
 
+run_cli_untracked() {
+    repos_to_process="${1:-$ALL_REPOS}"
+    _log "Listing ALL Untracked Files (including ignored files)"
+    printf "%s" "$repos_to_process" | while IFS=: read -r repo_dir repo_url;
+        do
+        [ -z "$repo_dir" ] && continue
+        if ! echo "$repo_dir" | grep -q ':'; then
+            repo_url=$(printf "%s" "$ALL_REPOS" | grep "^${repo_dir}:" | cut -d: -f2-)
+        fi
+
+        if ! [ -d "$repo_dir" ]; then
+            _warn "'$repo_dir' not cloned yet."
+            printf "\n"
+            continue
+        fi
+
+        _log "Checking '$repo_dir'"
+
+        # Get ALL untracked files (including those that would be ignored by .gitignore)
+        untracked_files=$(git -C "$repo_dir" ls-files --others)
+
+        if [ -n "$untracked_files" ]; then
+            untracked_count=$(echo "$untracked_files" | wc -l)
+            _warn "Has $untracked_count untracked file(s)"
+            printf "  ${C_YELLOW}Untracked files:${C_RESET}\n"
+            echo "$untracked_files" | sed 's/^/    /'
+        else
+            _success "No untracked files"
+        fi
+
+        printf "\n"
+    done
+}
+
 # --- TUI Functions ---
 _read_key() {
     char=""
@@ -378,6 +424,8 @@ _read_key() {
         key="push"
     elif [ "$char" = "l" ]; then # NEW: 'l' for Pull
         key="pull"
+    elif [ "$char" = "n" ]; then # NEW: 'n' for uNtracked
+        key="untracked"
     elif [ "$char" = "k" ]; then
         key="selectnotok"
     # --- End New Shortcuts ---
@@ -411,7 +459,7 @@ draw_interface() {
     printf "╚════════════════════════════════════════════════════════════════════════════════════╝${C_RESET}\n"
     printf "  Navigate: ↑/↓  Switch: TAB  Toggle: SPACE  Run: ENTER  Quit: q\n"
     printf "  Repo List:  ${C_BOLD}a${C_RESET}/${C_BOLD}u${C_RESET} (All/None)  ${C_BOLD}k${C_RESET} (Not OK)  ${C_BOLD}t${C_RESET} (Status)  ${C_BOLD}f${C_RESET} (Fetch)  ${C_BOLD}r${C_RESET} (Refresh)  ${C_BOLD}w${C_RESET} (Edit Path)\n"
-    printf "  Shortcuts:  Strategy: ${C_BOLD}o${C_RESET} (Local) ${C_BOLD}e${C_RESET} (Remote)  |  Action: ${C_BOLD}s${C_RESET} (Sync) ${C_BOLD}p${C_RESET} (Push) ${C_BOLD}l${C_RESET} (Pull)\n\n\n"
+    printf "  Shortcuts:  Strategy: ${C_BOLD}o${C_RESET} (Local) ${C_BOLD}e${C_RESET} (Remote)  |  Action: ${C_BOLD}s${C_RESET} (Sync) ${C_BOLD}p${C_RESET} (Push) ${C_BOLD}l${C_RESET} (Pull) ${C_BOLD}n${C_RESET} (Untracked)\n\n\n"
 
     # --- Working Directory Selection ---
     _line=9;
@@ -489,6 +537,14 @@ draw_interface() {
     else
         printf "%s" "$_line_text"
     fi
+
+    _line=$((_line + 1)); _move_cursor $_line 4
+    _line_text=$(printf "[%s] U${C_BOLD}N${C_BOLD_OFF}TRACKED (List all untracked)" "$([ "$_action_selected" -eq 4 ] && printf "●" || printf " ")")
+    if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 4 ]; then
+        printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
+    else
+        printf "%s" "$_line_text"
+    fi
     printf "\n"
 
     # --- Repository Selection (FIXED with tput el) ---
@@ -543,7 +599,12 @@ draw_interface() {
 }
 
 run_tui_action() {
-    _restore_term; _clear_screen
+    _restore_term
+    # Don't clear screen immediately - will clear after showing message
+    printf "${C_BOLD}${C_CYAN}═══════════════════════════════════════════════════════════════${C_RESET}\n"
+    printf "${C_BOLD}${C_CYAN}                    Executing Actions...                       ${C_RESET}\n"
+    printf "${C_BOLD}${C_CYAN}═══════════════════════════════════════════════════════════════${C_RESET}\n\n"
+
     strategy="theirs"; [ "$_strategy_selected" -eq 0 ] && strategy="ours"
 
     # Determine working directory
@@ -556,11 +617,11 @@ run_tui_action() {
     # Verify working directory exists
     if [ ! -d "$work_dir" ]; then
         _error "Working directory does not exist: $work_dir"
-        printf "\n${C_YELLOW}Press 'm' to return to menu or any other key to exit.${C_RESET}\n"
+        printf "\n${C_YELLOW}Press 'q' to quit or any other key to return to menu.${C_RESET}\n"
         read -r choice
         case "$choice" in
-            m*|M*) return 0 ;;
-            *) return 1 ;;
+            q|Q) return 1 ;;  # Quit
+            *) return 0 ;;    # Return to menu
         esac
     fi
 
@@ -568,11 +629,11 @@ run_tui_action() {
     original_dir=$(pwd)
     cd "$work_dir" || {
         _error "Failed to change to working directory: $work_dir"
-        printf "\n${C_YELLOW}Press 'm' to return to menu or any other key to exit.${C_RESET}\n"
+        printf "\n${C_YELLOW}Press 'q' to quit or any other key to return to menu.${C_RESET}\n"
         read -r choice
         case "$choice" in
-            m*|M*) return 0 ;;
-            *) return 1 ;;
+            q|Q) return 1 ;;  # Quit
+            *) return 0 ;;    # Return to menu
         esac
     }
 
@@ -598,23 +659,24 @@ EOF
             1) run_cli_push "$selected_repos" ;;
             2) run_cli_pull "$selected_repos" ;;
             3) run_cli_status "$selected_repos" ;;
+            4) run_cli_untracked "$selected_repos" ;;
         esac
     fi
 
     # Return to original directory
     cd "$original_dir"
 
-    printf "\n${C_GREEN}${C_BOLD}All tasks complete!${C_RESET}\n"
-    printf "${C_YELLOW}Press 'm' to return to menu or any other key to exit.${C_RESET}\n"
+    printf "\n${C_BOLD}${C_CYAN}═══════════════════════════════════════════════════════════════${C_RESET}\n"
+    printf "${C_GREEN}${C_BOLD}                  All tasks complete!                          ${C_RESET}\n"
+    printf "${C_BOLD}${C_CYAN}═══════════════════════════════════════════════════════════════${C_RESET}\n"
+    printf "${C_YELLOW}Press 'q' to quit or any other key to return to menu.${C_RESET}\n"
 
-    # --- BUG FIX: Use 'read -r' to consume the newline ---
-    # This prevents the 'enter' from being passed to the next TUI loop
+    # Read user choice
     read -r choice
     case "$choice" in
-        m*|M*) return 0 ;; # Return to menu
-        *) return 1 ;;     # Exit
+        q|Q) return 1 ;;  # Exit
+        *) return 0 ;;    # Return to menu
     esac
-    # --- END BUG FIX ---
 }
 
 # --- FUNCTION: To refresh repo statuses (both local and remote) ---
@@ -831,12 +893,13 @@ run_interactive_mode() {
             sync)   _action_selected=0 ;; # 's'
             push)   _action_selected=1 ;; # 'p'
             pull)   _action_selected=2 ;; # 'l'
+            untracked) _action_selected=4 ;; # 'n'
 
             space)
                 case "$_current_field" in
                     0) _workdir_selected=$((1 - _workdir_selected)) ;;
                     1) _strategy_selected=$((1 - _strategy_selected)) ;;
-                    2) _action_selected=$(((_action_selected + 1) % 4)) ;;
+                    2) _action_selected=$(((_action_selected + 1) % 5)) ;;
                     3) # Toggle repo selection
                         current_char=$(echo "$_repo_selection" | cut -c $((_repo_cursor_index + 1)))
                         new_char=$([ "$current_char" = "y" ] && echo "n" || echo "y")
@@ -871,8 +934,9 @@ show_help() {
     printf "  (no command)\t\tLaunches the interactive TUI menu.\n"
     printf "  ${C_GREEN}sync [local|remote]${C_RESET}\tBidirectional sync. Default: 'remote'.\n"
     printf "  ${C_GREEN}push${C_RESET}\t\t\tPushes committed changes.\n"
-    printf "  ${C_GREEN}pull${C_RESET}\t\t\tPPulls using 'remote' strategy.\n"
+    printf "  ${C_GREEN}pull${C_RESET}\t\t\tPulls using 'remote' strategy.\n"
     printf "  ${C_GREEN}status${C_RESET}\t\t\tChecks git status for all repos.\n"
+    printf "  ${C_GREEN}untracked${C_RESET}\t\tLists ALL untracked files (including ignored).\n"
     printf "  ${C_GREEN}help${C_RESET}\t\t\tShows this help message.\n\E[0m\n"
 }
 
@@ -883,6 +947,7 @@ main() {
         push) run_cli_push ;;
         pull) run_cli_pull ;;
         status) run_cli_status ;;
+        untracked) run_cli_untracked ;;
         help|-h|--help) show_help ;;
         "") run_interactive_mode ;;
         *) _error "Invalid command: $1"; show_help; exit 1 ;;
