@@ -354,12 +354,20 @@ def restore_symlinks(repo_path: str):
 @dataclass
 class TUIState:
     """State for TUI interface"""
-    workdir_selected: int = 1  # 0=current dir, 1=custom path
-    workdir_path: str = "/home/diego/Documents/Git"
+    workdir_selected: int = 1
+    workdir_path: str = str(Path.home() / "Documents/Git")
+    strategy_selected: int = 1  # 0=local, 1=remote
+    action_selected: int = 0    # 0=sync, 1=push, 2=pull, 3=status, 4=untracked
+    repo_cursor_index: int = 0
+    repo_selections: List[bool] = None
+    current_field: int = 3      # Start in the repo list
+    
     repo_status_list: List[str] = None
     repo_fetch_status_list: List[str] = None
 
     def __post_init__(self):
+        if self.repo_selections is None:
+            self.repo_selections = []
         if self.repo_status_list is None:
             self.repo_status_list = []
         if self.repo_fetch_status_list is None:
@@ -371,25 +379,23 @@ class TUI:
     def __init__(self, stdscr):
         self.stdscr = stdscr
         self.state = TUIState()
-        self.repo_names = list(ALL_REPOS.keys())
+        self.repo_names = sorted(list(ALL_REPOS.keys()))
         self.repo_count = len(self.repo_names)
+        
+        self.FIELD_WORKDIR = 0
+        self.FIELD_STRATEGY = 1
+        self.FIELD_ACTION = 2
+        self.FIELD_REPOS = 3
+        self.FIELD_RUN = 4
+        self.TOTAL_FIELDS = 5
 
-        # Check minimum terminal size
+        self.STRATEGIES = ["L(o)cal  (Keep local changes)", "R(e)mote (Overwrite with remote)"]
+        self.ACTIONS = ["(S)ync   (Remote <-> Local)", "(P)ush   (Local -> Remote)", "Pu(l)l   (Remote -> Local)", "Sta(t)us (Check repos)", "U(n)tracked (List all untracked)"]
+
         max_y, max_x = stdscr.getmaxyx()
-        min_height = 25
-        min_width = 75
+        if max_y < 30 or max_x < 80:
+            raise Exception(f"Terminal too small! Minimum: 80x30, Current: {max_x}x{max_y}")
 
-        if max_y < min_height or max_x < min_width:
-            stdscr.clear()
-            stdscr.addstr(0, 0, f"Terminal too small! Minimum size: {min_width}x{min_height}")
-            stdscr.addstr(1, 0, f"Current size: {max_x}x{max_y}")
-            stdscr.addstr(2, 0, "Please resize your terminal and try again.")
-            stdscr.addstr(4, 0, "Press any key to exit...")
-            stdscr.refresh()
-            stdscr.getch()
-            raise Exception("Terminal too small")
-
-        # Initialize curses colors
         curses.start_color()
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_RED, -1)
@@ -397,278 +403,246 @@ class TUI:
         curses.init_pair(3, curses.COLOR_YELLOW, -1)
         curses.init_pair(4, curses.COLOR_BLUE, -1)
         curses.init_pair(5, curses.COLOR_CYAN, -1)
-        curses.init_pair(6, curses.COLOR_MAGENTA, -1)
+        curses.init_pair(7, curses.COLOR_WHITE, curses.COLOR_BLUE)
+        curses.init_pair(8, curses.COLOR_BLACK, curses.COLOR_GREEN)
 
-        # Color constants
         self.C_RED = curses.color_pair(1)
         self.C_GREEN = curses.color_pair(2)
         self.C_YELLOW = curses.color_pair(3)
         self.C_BLUE = curses.color_pair(4)
         self.C_CYAN = curses.color_pair(5)
-        self.C_MAGENTA = curses.color_pair(6)
         self.C_BOLD = curses.A_BOLD
+        self.C_HIGHLIGHT = curses.color_pair(7)
+        self.C_RUN_HL = curses.color_pair(8)
 
-        # Initialize status lists with placeholders
+        self.state.repo_selections = [True] * self.repo_count
         self.state.repo_status_list = ["Not Checked"] * self.repo_count
         self.state.repo_fetch_status_list = ["Not Checked"] * self.repo_count
 
-        # Hide cursor
         curses.curs_set(0)
-
-        # Initial status refresh (local only for speed)
+        self.stdscr.keypad(True)
         self.refresh_status_only()
 
     def get_working_dir(self) -> str:
-        """Get current working directory based on selection"""
         if self.state.workdir_selected == 0:
             return os.getcwd()
         return self.state.workdir_path
 
     def refresh_status_only(self):
-        """Refresh local status only (fast)"""
         work_dir = self.get_working_dir()
+        if not Path(work_dir).is_dir(): return
+        
+        original_dir = os.getcwd()
         os.chdir(work_dir)
-
         for i, repo_name in enumerate(self.repo_names):
-            repo_dir = os.path.join(work_dir, repo_name)
-            self.state.repo_status_list[i] = get_repo_status(repo_dir)
+            self.state.repo_status_list[i] = get_repo_status(repo_name)
+        os.chdir(original_dir)
 
     def refresh_fetch_only(self):
-        """Refresh remote fetch status only"""
         work_dir = self.get_working_dir()
-        os.chdir(work_dir)
+        if not Path(work_dir).is_dir(): return
 
+        original_dir = os.getcwd()
+        os.chdir(work_dir)
         for i, repo_name in enumerate(self.repo_names):
-            repo_dir = os.path.join(work_dir, repo_name)
-            self.state.repo_fetch_status_list[i] = get_repo_fetch_status(repo_dir)
+            self.state.repo_fetch_status_list[i] = get_repo_fetch_status(repo_name)
+        os.chdir(original_dir)
 
     def refresh_both(self):
-        """Refresh both local and remote status"""
         self.refresh_status_only()
         self.refresh_fetch_only()
 
-    def draw_header(self):
-        """Draw the header"""
-        self.stdscr.clear()
-        max_y, max_x = self.stdscr.getmaxyx()
-
+    def _draw_dynamic_title_box(self, text: str):
+        padded_text = f" {text} "
+        width = len(padded_text)
         try:
-            # Title box
-            title = " gcl.py - Git Sync Manager "
-            self.stdscr.addstr(1, 2, "╔" + "═" * (len(title)) + "╗", self.C_CYAN | self.C_BOLD)
-            self.stdscr.addstr(2, 2, "║", self.C_CYAN | self.C_BOLD)
-            self.stdscr.addstr(2, 3, title, self.C_CYAN | self.C_BOLD)
-            self.stdscr.addstr(2, 3 + len(title), "║", self.C_CYAN | self.C_BOLD)
-            self.stdscr.addstr(3, 2, "╚" + "═" * (len(title)) + "╝", self.C_CYAN | self.C_BOLD)
+            self.stdscr.addstr(0, 0, "╔" + "═" * width + "╗", self.C_CYAN | self.C_BOLD)
+            self.stdscr.addstr(1, 0, f"║{padded_text}║", self.C_CYAN | self.C_BOLD)
+            self.stdscr.addstr(2, 0, "╚" + "═" * width + "╝", self.C_CYAN | self.C_BOLD)
+        except curses.error: pass
 
-            # Working directory selection
-            line = 5
-            self.stdscr.addstr(line, 2, "Working Directory:", self.C_BOLD)
-            line += 1
+    def _draw_selection_list(self, y, title, options, selected_index, is_active_field):
+        self.stdscr.addstr(y, 2, title, self.C_BLUE | self.C_BOLD)
+        self.stdscr.addstr(y + 1, 2, "─" * (len(title)), self.C_BLUE)
+        y += 2
+        for i, option_text in enumerate(options):
+            attr = self.C_HIGHLIGHT if is_active_field and i == selected_index else curses.A_NORMAL
+            
+            final_attr = attr
+            if i == selected_index:
+                final_attr = final_attr | self.C_BOLD
+            
+            marker = "●" if i == selected_index else " "
+            self.stdscr.addstr(y + i, 4, f"[{marker}] {option_text}", final_attr)
+        return y + len(options)
 
-            # Option 1: Current directory
-            marker1 = "[✓]" if self.state.workdir_selected == 0 else "[ ]"
-            self.stdscr.addstr(line, 4, marker1, self.C_YELLOW)
-            self.stdscr.addstr(line, 8, "Current: ", self.C_BOLD)
-            cwd = os.getcwd()
-            self.stdscr.addstr(line, 17, cwd[:max_x - 20] if len(cwd) > max_x - 20 else cwd)
-            line += 1
-
-            # Option 2: Custom path
-            marker2 = "[✓]" if self.state.workdir_selected == 1 else "[ ]"
-            self.stdscr.addstr(line, 4, marker2, self.C_YELLOW)
-            self.stdscr.addstr(line, 8, "Custom:  ", self.C_BOLD)
-            custom_path = self.state.workdir_path
-            self.stdscr.addstr(line, 17, custom_path[:max_x - 20] if len(custom_path) > max_x - 20 else custom_path)
-
-            return line + 2
-        except curses.error:
-            return 9  # Default line position if header fails
-
-    def draw_repo_list(self, start_line: int):
-        """Draw the repository list with three columns"""
+    def draw_colored_status(self, y: int, x: int, status_text: str, base_attr=curses.A_NORMAL):
         max_y, max_x = self.stdscr.getmaxyx()
-        line = start_line
+        if y >= max_y or x >= max_x: return
 
-        # Check if we have room for headers
-        if line >= max_y - 3:
-            return line
-
-        try:
-            # Column headers
-            self.stdscr.addstr(line, 2, "Repository", self.C_CYAN | self.C_BOLD)
-            self.stdscr.addstr(line, 35, "Local Status", self.C_CYAN | self.C_BOLD)
-            self.stdscr.addstr(line, 60, "Remote Status", self.C_CYAN | self.C_BOLD)
-            line += 1
-
-            # Separator
-            self.stdscr.addstr(line, 2, "─" * 75, self.C_CYAN)
-            line += 1
-        except curses.error:
-            return line
-
-        # Repository rows
-        repos_drawn = 0
-        for i, repo_name in enumerate(self.repo_names):
-            # Stop if we're running out of space (leave room for actions menu)
-            if line + i >= max_y - 15:
-                # Show indicator that there are more repos
-                if i < len(self.repo_names):
-                    remaining = len(self.repo_names) - i
-                    try:
-                        self.stdscr.addstr(line + i, 2, f"... and {remaining} more repos (resize terminal to see all)", self.C_YELLOW)
-                    except curses.error:
-                        pass
-                break
-
-            try:
-                # Repository name
-                self.stdscr.addstr(line + i, 2, repo_name[:30])
-
-                # Local status (parse color from ANSI codes)
-                local_status = self.state.repo_status_list[i]
-                self.draw_colored_status(line + i, 35, local_status)
-
-                # Remote status
-                remote_status = self.state.repo_fetch_status_list[i]
-                self.draw_colored_status(line + i, 60, remote_status)
-
-                repos_drawn += 1
-            except curses.error:
-                break
-
-        return line + repos_drawn + 1
-
-    def draw_colored_status(self, y: int, x: int, status_text: str):
-        """Draw status text with appropriate color"""
-        max_y, max_x = self.stdscr.getmaxyx()
-
-        # Don't draw if outside screen bounds
-        if y >= max_y - 1 or x >= max_x - 1:
-            return
-
-        # Remove ANSI color codes and determine color
-        clean_text = status_text
+        clean_text = status_text.replace(Colors.RESET, "")
         color = curses.A_NORMAL
-
-        if "Not Cloned" in status_text or "Not Checked" in status_text:
-            color = self.C_YELLOW
-            clean_text = status_text.replace(Colors.YELLOW, "").replace(Colors.RESET, "")
-        elif "OK" in status_text or "Up to Date" in status_text or "Clean" in status_text:
-            color = self.C_GREEN
-            clean_text = status_text.replace(Colors.GREEN, "").replace(Colors.RESET, "")
-        elif "To Pull" in status_text or "Unpushed" in status_text or "Uncommitted" in status_text:
-            color = self.C_RED if "To Pull" in status_text else self.C_YELLOW
-            clean_text = status_text.replace(Colors.RED, "").replace(Colors.YELLOW, "").replace(Colors.RESET, "")
-        elif "No Remote" in status_text or "Fetch Failed" in status_text:
-            color = self.C_RED
-            clean_text = status_text.replace(Colors.RED, "").replace(Colors.RESET, "")
-
+        if Colors.YELLOW in status_text: color = self.C_YELLOW
+        if Colors.GREEN in status_text: color = self.C_GREEN
+        if Colors.RED in status_text: color = self.C_RED
+        
+        clean_text = clean_text.replace(Colors.YELLOW, "").replace(Colors.GREEN, "").replace(Colors.RED, "")
+        
         try:
-            self.stdscr.addstr(y, x, clean_text[:20], color)
+            self.stdscr.addstr(y, x, clean_text.ljust(20), color | base_attr)
         except curses.error:
-            # Silently ignore if we can't write (edge of screen)
             pass
 
-    def draw_actions(self, start_line: int):
-        """Draw action menu"""
-        max_y, max_x = self.stdscr.getmaxyx()
-        line = start_line
-
-        # Check if we have room for the actions header
-        if line >= max_y - 1:
-            return line
-
-        try:
-            self.stdscr.addstr(line, 2, "Actions:", self.C_CYAN | self.C_BOLD)
-        except curses.error:
-            return line
-        line += 1
-
-        actions = [
-            ("s", "Sync (bidirectional)"),
-            ("p", "Push"),
-            ("l", "Pull"),
-            ("u", "Untracked files"),
-            ("y", "Restore symlinks"),
-            ("", ""),
-            ("t", "Refresh status only"),
-            ("f", "Refresh fetch only"),
-            ("r", "Refresh both"),
-            ("", ""),
-            ("w", "Toggle working dir"),
-            ("q", "Quit"),
-        ]
-
-        for key, desc in actions:
-            # Stop if we're at the bottom of the screen
-            if line >= max_y - 1:
-                break
-
-            if key:
-                try:
-                    self.stdscr.addstr(line, 4, f"[{key}]", self.C_YELLOW | self.C_BOLD)
-                    self.stdscr.addstr(line, 8, desc)
-                except curses.error:
-                    break
-            line += 1
-
-        return line
-
     def draw_screen(self):
-        """Draw the entire screen"""
-        line = self.draw_header()
-        line = self.draw_repo_list(line)
-        self.draw_actions(line)
-        self.stdscr.refresh()
-
-    def show_message(self, message: str):
-        """Show a message and wait for key press"""
         self.stdscr.clear()
-        self.stdscr.addstr(1, 2, message, self.C_CYAN | self.C_BOLD)
-        self.stdscr.addstr(3, 2, "Press 'q' to quit or any other key to return to menu...", self.C_YELLOW)
+        max_y, max_x = self.stdscr.getmaxyx()
+        
+        self._draw_dynamic_title_box("gcl.py - Git Sync Manager")
+        
+        line = 4
+        workdir_opts = [f"Current Directory (.)", f"Custom Path: {self.state.workdir_path}"]
+        line = self._draw_selection_list(line, "WORKING DIRECTORY:", workdir_opts, self.state.workdir_selected, self.state.current_field == self.FIELD_WORKDIR)
+        
+        line = self._draw_selection_list(line, "MERGE STRATEGY (On Conflict):", self.STRATEGIES, self.state.strategy_selected, self.state.current_field == self.FIELD_STRATEGY)
+
+        line = self._draw_selection_list(line, "ACTION:", self.ACTIONS, self.state.action_selected, self.state.current_field == self.FIELD_ACTION)
+
+        repo_title = "REPOSITORIES (Toggle with SPACE):"
+        self.stdscr.addstr(line, 2, repo_title, self.C_BLUE | self.C_BOLD)
+        self.stdscr.addstr(line + 1, 2, "─" * len(repo_title), self.C_BLUE)
+        
+        local_title = "LOCAL STATUS:"
+        self.stdscr.addstr(line, 40, local_title, self.C_BLUE | self.C_BOLD)
+        self.stdscr.addstr(line + 1, 40, "─" * len(local_title), self.C_BLUE)
+
+        remote_title = "REMOTE STATUS:"
+        self.stdscr.addstr(line, 60, remote_title, self.C_BLUE | self.C_BOLD)
+        self.stdscr.addstr(line + 1, 60, "─" * len(remote_title), self.C_BLUE)
+        line += 2
+        
+        for i in range(self.repo_count):
+            if line >= max_y - 8: break
+            
+            is_active = self.state.current_field == self.FIELD_REPOS and i == self.state.repo_cursor_index
+            attr = self.C_HIGHLIGHT if is_active else curses.A_NORMAL
+            marker = "✓" if self.state.repo_selections[i] else " "
+            repo_text = f"[{marker}] {self.repo_names[i]}"
+
+            self.stdscr.addstr(line, 0, " " * (max_x), attr)
+            self.stdscr.addstr(line, 2, repo_text, attr)
+            self.draw_colored_status(line, 40, self.state.repo_status_list[i], base_attr=attr)
+            self.draw_colored_status(line, 60, self.state.repo_fetch_status_list[i], base_attr=attr)
+            line += 1
+        
+        run_line = line + 1
+        run_attr = self.C_RUN_HL if self.state.current_field == self.FIELD_RUN else self.C_BOLD
+        self.stdscr.addstr(run_line, 4, "[ RUN ]", run_attr)
+
+        help_line = run_line + 3
+        if help_line < max_y - 7:
+            self.stdscr.addstr(help_line, 2, "KEYBOARD SHORTCUTS", self.C_BLUE | self.C_BOLD)
+            help_line += 1
+            self.stdscr.addstr(help_line, 2, "─" * (max_x - 4), self.C_BLUE)
+            help_line += 1
+
+            # Navigate
+            self.stdscr.addstr(help_line, 2, "Navigate:", self.C_BOLD)
+            self.stdscr.addstr(help_line, 12, " (")
+            self.stdscr.addstr("↑/↓", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") List | (")
+            self.stdscr.addstr("TAB", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") Field | (")
+            self.stdscr.addstr("SPACE", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") Toggle | (")
+            self.stdscr.addstr("ENTER", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") Run | (")
+            self.stdscr.addstr("q", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") Quit")
+            help_line += 1
+
+            # Select
+            self.stdscr.addstr(help_line, 2, "Select:  ", self.C_BOLD)
+            self.stdscr.addstr(help_line, 12, " (")
+            self.stdscr.addstr("a", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") All | (")
+            self.stdscr.addstr("u", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") None | (")
+            self.stdscr.addstr("k", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") Not OK")
+            help_line += 1
+
+            # Strategy
+            self.stdscr.addstr(help_line, 2, "Strategy:", self.C_BOLD)
+            self.stdscr.addstr(help_line, 12, " (")
+            self.stdscr.addstr("o", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") Local | (")
+            self.stdscr.addstr("e", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") Remote")
+            help_line += 1
+
+            # Actions
+            self.stdscr.addstr(help_line, 2, "Actions: ", self.C_BOLD)
+            self.stdscr.addstr(help_line, 12, " (")
+            self.stdscr.addstr("s", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") Sync | (")
+            self.stdscr.addstr("p", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") Push | (")
+            self.stdscr.addstr("l", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") Pull")
+            help_line += 1
+            self.stdscr.addstr(help_line, 12, " (")
+            self.stdscr.addstr("n", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") Untracked | (")
+            self.stdscr.addstr("t", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") Status | (")
+            self.stdscr.addstr("f", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") Fetch | (")
+            self.stdscr.addstr("r", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") Refresh")
+            help_line += 1
+            
+            # Tools
+            self.stdscr.addstr(help_line, 2, "Tools:   ", self.C_BOLD)
+            self.stdscr.addstr(help_line, 12, " (")
+            self.stdscr.addstr("w", self.C_YELLOW | self.C_BOLD)
+            self.stdscr.addstr(") Toggle Workdir")
+        
         self.stdscr.refresh()
 
-        while True:
-            key = self.stdscr.getch()
-            if key == ord('q'):
-                return False
-            else:
-                return True
+    def execute_action(self) -> bool:
+        action_map = ['sync', 'push', 'pull', 'status', 'untracked']
+        strategy_map = ['local', 'theirs']
 
-    def execute_action(self, action: str, strategy: str = 'remote'):
-        """Execute action and show results"""
-        # Clear screen and show we're working
+        action = action_map[self.state.action_selected]
+        strategy = strategy_map[self.state.strategy_selected]
+        
+        selected_repos = [self.repo_names[i] for i, s in enumerate(self.state.repo_selections) if s]
+        
+        if not selected_repos:
+            self.show_message("No repositories selected. Nothing to do.")
+            return True
+
         self.stdscr.clear()
         self.stdscr.addstr(1, 2, f"Executing {action}...", self.C_CYAN | self.C_BOLD)
-        self.stdscr.addstr(2, 2, "Please wait...", self.C_YELLOW)
         self.stdscr.refresh()
-
-        # Restore terminal for command output
         curses.endwin()
 
-        # Execute the action
         work_dir = self.get_working_dir()
+        original_dir = os.getcwd()
         os.chdir(work_dir)
 
-        if action == 'sync':
-            run_cli_sync(strategy)
-        elif action == 'push':
-            run_cli_push()
-        elif action == 'pull':
-            run_cli_pull()
-        elif action == 'status':
-            run_cli_status()
-        elif action == 'untracked':
-            run_cli_untracked()
-        elif action == 'symlinks':
-            restore_symlinks(work_dir)
+        print("\n" + "="*60)
+        
+        if action == 'sync': run_cli_sync(strategy, repos=selected_repos)
+        elif action == 'push': run_cli_push(repos=selected_repos)
+        elif action == 'pull': run_cli_pull(repos=selected_repos)
+        elif action == 'status': run_cli_status(repos=selected_repos)
+        elif action == 'untracked': run_cli_untracked(repos=selected_repos)
 
-        # Wait for user
+        print("="*60)
         print(f"\n{Colors.YELLOW}Press 'q' to quit or any other key to return to menu...{Colors.RESET}")
-
-        # Get single character input
-        import sys, tty, termios
+        
+        import tty, termios
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
         try:
@@ -676,88 +650,77 @@ class TUI:
             ch = sys.stdin.read(1)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-
-        # Reinitialize curses
+        
+        os.chdir(original_dir)
         self.stdscr = curses.initscr()
         curses.noecho()
         curses.cbreak()
         self.stdscr.keypad(True)
-        curses.curs_set(0)
-
-        # Reinitialize colors
-        curses.start_color()
-        curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_RED, -1)
-        curses.init_pair(2, curses.COLOR_GREEN, -1)
-        curses.init_pair(3, curses.COLOR_YELLOW, -1)
-        curses.init_pair(4, curses.COLOR_BLUE, -1)
-        curses.init_pair(5, curses.COLOR_CYAN, -1)
-        curses.init_pair(6, curses.COLOR_MAGENTA, -1)
-
-        if ch == 'q':
+        
+        if ch.lower() == 'q':
             return False
-
-        # Refresh status after action
+        
         self.refresh_both()
         return True
 
-    def run(self):
-        """Main TUI loop"""
-        self.draw_screen()
+    def show_message(self, message: str):
+        self.stdscr.clear()
+        self.stdscr.addstr(1, 2, message, self.C_CYAN | self.C_BOLD)
+        self.stdscr.addstr(3, 2, "Press any key to return...", self.C_YELLOW)
+        self.stdscr.refresh()
+        self.stdscr.getch()
 
+    def run(self):
         while True:
+            self.draw_screen()
             key = self.stdscr.getch()
 
-            if key == ord('q'):
-                break
-            elif key == ord('w'):
-                # Toggle working directory
-                self.state.workdir_selected = 1 - self.state.workdir_selected
-                self.refresh_both()
-                self.draw_screen()
-            elif key == ord('t'):
-                # Refresh status only
-                self.stdscr.addstr(0, 0, "Refreshing status...", self.C_YELLOW)
-                self.stdscr.refresh()
-                self.refresh_status_only()
-                self.draw_screen()
-            elif key == ord('f'):
-                # Refresh fetch only
-                self.stdscr.addstr(0, 0, "Fetching from remote...", self.C_YELLOW)
-                self.stdscr.refresh()
-                self.refresh_fetch_only()
-                self.draw_screen()
-            elif key == ord('r'):
-                # Refresh both
-                self.stdscr.addstr(0, 0, "Refreshing all...", self.C_YELLOW)
-                self.stdscr.refresh()
-                self.refresh_both()
-                self.draw_screen()
-            elif key == ord('s'):
-                # Sync - ask for strategy
-                if not self.execute_action('sync', 'remote'):
-                    break
-                self.draw_screen()
-            elif key == ord('p'):
-                # Push
-                if not self.execute_action('push'):
-                    break
-                self.draw_screen()
-            elif key == ord('l'):
-                # Pull
-                if not self.execute_action('pull'):
-                    break
-                self.draw_screen()
-            elif key == ord('u'):
-                # Untracked
-                if not self.execute_action('untracked'):
-                    break
-                self.draw_screen()
-            elif key == ord('y'):
-                # Symlinks
-                if not self.execute_action('symlinks'):
-                    break
-                self.draw_screen()
+            if key == ord('q'): break
+            
+            if key == ord('\t') or key == curses.KEY_RIGHT:
+                self.state.current_field = (self.state.current_field + 1) % self.TOTAL_FIELDS
+            elif key == curses.KEY_BTAB or key == curses.KEY_LEFT:
+                self.state.current_field = (self.state.current_field - 1 + self.TOTAL_FIELDS) % self.TOTAL_FIELDS
+            elif key == ord('\n') or key == curses.KEY_ENTER:
+                if not self.execute_action(): break
+                continue
+            
+            field = self.state.current_field
+            if field == self.FIELD_WORKDIR:
+                if key in [curses.KEY_UP, curses.KEY_DOWN, ord(' ')]:
+                    self.state.workdir_selected = 1 - self.state.workdir_selected
+            elif field == self.FIELD_STRATEGY:
+                if key in [curses.KEY_UP, curses.KEY_DOWN, ord(' ')]:
+                    self.state.strategy_selected = 1 - self.state.strategy_selected
+            elif field == self.FIELD_ACTION:
+                if key == curses.KEY_UP:
+                    self.state.action_selected = (self.state.action_selected - 1 + len(self.ACTIONS)) % len(self.ACTIONS)
+                elif key in [curses.KEY_DOWN, ord(' ')]:
+                    self.state.action_selected = (self.state.action_selected + 1) % len(self.ACTIONS)
+            elif field == self.FIELD_REPOS:
+                if key == curses.KEY_UP:
+                    self.state.repo_cursor_index = (self.state.repo_cursor_index - 1 + self.repo_count) % self.repo_count
+                elif key == curses.KEY_DOWN:
+                    self.state.repo_cursor_index = (self.state.repo_cursor_index + 1) % self.repo_count
+                elif key == ord(' '):
+                    idx = self.state.repo_cursor_index
+                    self.state.repo_selections[idx] = not self.state.repo_selections[idx]
+                elif key == ord('a'):
+                    self.state.repo_selections = [True] * self.repo_count
+                elif key == ord('u'):
+                    self.state.repo_selections = [False] * self.repo_count
+                elif key == ord('k'):
+                    self.state.repo_selections = ["OK" not in s for s in self.state.repo_status_list]
+            
+            # Global shortcuts
+            if key == ord('o'): self.state.strategy_selected = 0
+            elif key == ord('e'): self.state.strategy_selected = 1
+            elif key == ord('s'): self.state.action_selected = 0
+            elif key == ord('p'): self.state.action_selected = 1
+            elif key == ord('l'): self.state.action_selected = 2
+            elif key == ord('t'): self.state.action_selected = 3
+            elif key == ord('n'): self.state.action_selected = 4
+            elif key == ord('r'): self.refresh_both()
 
 def run_tui():
     """Launch the TUI"""

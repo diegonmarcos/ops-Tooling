@@ -478,8 +478,9 @@ draw_interface() {
     # --- Working Directory Selection ---
     _line=4;
     _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}WORKING DIRECTORY:${C_RESET}"
+    _move_cursor $((_line + 1)) 2; printf "${C_BLUE}══════════════════${C_RESET}"
 
-    _line=$((_line + 1)); _move_cursor $_line 4
+    _line=$((_line + 2)); _move_cursor $_line 4
     _line_text=$(printf "[%s] Current Directory (.)" "$([ "$_workdir_selected" -eq 0 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 0 ] && [ "$_workdir_selected" -eq 0 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
@@ -497,10 +498,11 @@ draw_interface() {
     printf "\n"
 
     # --- Strategy Selection (FIXED with tput el) ---
-    _line=$((_line + 2));
+    _line=$((_line + 3));
     _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}MERGE STRATEGY (On Conflict):${C_RESET}"
+    _move_cursor $((_line + 1)) 2; printf "${C_BLUE}══════════════════════════════${C_RESET}"
 
-    _line=$((_line + 1)); _move_cursor $_line 4
+    _line=$((_line + 2)); _move_cursor $_line 4
     _line_text=$(printf "[%s] L${C_BOLD}O${C_BOLD_OFF}CAL  (Keep local changes)" "$([ "$_strategy_selected" -eq 0 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 1 ] && [ "$_strategy_selected" -eq 0 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
@@ -518,9 +520,10 @@ draw_interface() {
     printf "\n"
 
     # --- Action Selection (FIXED with tput el) ---
-    _line=$((_line + 2)); _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}ACTION:${C_RESET}"
+    _line=$((_line + 3)); _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}ACTION:${C_RESET}"
+    _move_cursor $((_line + 1)) 2; printf "${C_BLUE}═══════${C_RESET}"
 
-    _line=$((_line + 1)); _move_cursor $_line 4
+    _line=$((_line + 2)); _move_cursor $_line 4
     _line_text=$(printf "[%s] ${C_BOLD}S${C_BOLD_OFF}YNC   (Remote <-> Local)" "$([ "$_action_selected" -eq 0 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 0 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
@@ -562,10 +565,14 @@ draw_interface() {
     printf "\n"
 
     # --- Repository Selection (FIXED with tput el) ---
-    _line=$((_line + 2));
+    _line=$((_line + 3));
     _move_cursor $_line 2;  printf "${C_BOLD}${C_BLUE}REPOSITORIES (Toggle with SPACE):${C_RESET}"
     _move_cursor $_line 40; printf "${C_BOLD}${C_BLUE}LOCAL STATUS:${C_RESET}"
     _move_cursor $_line 60; printf "${C_BOLD}${C_BLUE}REMOTE STATUS:${C_RESET}"
+    _line=$((_line + 1));
+    _move_cursor $_line 2; printf "${C_BLUE}═════════════════════════════════${C_RESET}"
+    _move_cursor $_line 40; printf "${C_BLUE}═════════════${C_RESET}"
+    _move_cursor $_line 60; printf "${C_BLUE}══════════════${C_RESET}"
 
     i=0
     while [ "$i" -lt "$_repo_count" ]; do
@@ -609,10 +616,12 @@ draw_interface() {
     fi
 
     # --- MOVED HELP TEXT ---
-    _help_line=$((_run_button_line + 3))
+    _help_line=$((_run_button_line + 6))
     _move_cursor $_help_line 2
     printf "${C_BOLD}${C_BLUE}KEYBOARD SHORTCUTS${C_RESET}\n"
-    _help_line=$((_help_line + 1))
+    _move_cursor $(($_help_line + 1)) 2
+    printf "${C_BLUE}═══════════════════${C_RESET}\n"
+    _help_line=$((_help_line + 2))
 
     _move_cursor $_help_line 2
     printf "${C_BOLD}Navigate:${C_RESET} (${C_YELLOW}${C_BOLD}↑${C_RESET}/${C_YELLOW}${C_BOLD}↓${C_RESET}) List | (${C_YELLOW}${C_BOLD}TAB${C_RESET}) Field | (${C_YELLOW}${C_BOLD}SPACE${C_RESET}) Toggle | (${C_YELLOW}${C_BOLD}ENTER${C_RESET}) Run | (${C_YELLOW}${C_BOLD}q${C_RESET}) Quit\n"
@@ -627,11 +636,14 @@ draw_interface() {
     _help_line=$((_help_line + 1))
 
     _move_cursor $_help_line 2
-    printf "${C_BOLD}Actions:${C_RESET}  (${C_YELLOW}${C_BOLD}s${C_RESET}) Sync | (${C_YELLOW}${C_BOLD}p${C_RESET}) Push | (${C_YELLOW}${C_BOLD}l${C_RESET}) Pull | (${C_YELLOW}${C_BOLD}n${C_RESET}) Untracked | (${C_YELLOW}${C_BOLD}t${C_RESET}) Status | (${C_YELLOW}${C_BOLD}f${C_RESET}) Fetch | (${C_YELLOW}${C_BOLD}r${C_RESET}) Refresh\n"
+    printf "${C_BOLD}Actions:${C_RESET}  (${C_YELLOW}${C_BOLD}s${C_RESET}) Sync | (${C_YELLOW}${C_BOLD}p${C_RESET}) Push | (${C_YELLOW}${C_BOLD}l${C_RESET}) Pull\n"
+    _help_line=$((_help_line + 1))
+
+    _move_cursor $_help_line 13; printf "(${C_YELLOW}${C_BOLD}n${C_RESET}) Untracked | (${C_YELLOW}${C_BOLD}t${C_RESET}) Status | (${C_YELLOW}${C_BOLD}f${C_RESET}) Fetch | (${C_YELLOW}${C_BOLD}r${C_RESET}) Refresh\n"
     _help_line=$((_help_line + 1))
 
     _move_cursor $_help_line 2
-    printf "${C_BOLD}Tools:${C_RESET}    (${C_YELLOW}${C_BOLD}w${C_RESET}) Edit Path | (${C_YELLOW}${C_BOLD}y${C_RESET}) Restore Symlinks\n"
+    printf "${C_BOLD}Tools:${C_RESET}    (${C_YELLOW}${C_BOLD}w${C_RESET}) Toggle Workdir\n"
 
     _move_cursor $(($_help_line + 2)) 0
 }
