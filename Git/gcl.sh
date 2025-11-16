@@ -49,9 +49,14 @@ _repo_cursor_index=0      # For scrolling through repos
 _repo_selection=""        # A string of 'y'/'n' for each repo
 _repo_list=""             # A newline-separated list of repo names
 _repo_status_list=""      # A newline-separated list of repo statuses
+_repo_fetch_status_list="" # A newline-separated list of fetch statuses (unpulled commits)
 _repo_count=0
-_current_field=0          # 0=strategy, 1=action, 2=repos, 3=run button
-_total_fields=4
+_current_field=0          # 0=working_dir, 1=strategy, 2=action, 3=repos, 4=run button
+_total_fields=5
+_workdir_selected=1       # 0=current dir, 1=custom path (default)
+_workdir_path="/home/diego/Documents/Git"  # Default custom path
+_workdir_edit_mode=0      # 0=not editing, 1=editing path
+_workdir_cursor_pos=28    # Cursor position when editing (start at end)
 
 # --- Color and Terminal Control ---
 C_RESET="\033[0m"; C_BOLD="\033[1m"; C_BOLD_OFF="\033[22m"; C_RED="\033[31m"; C_GREEN="\033[32m";
@@ -103,6 +108,38 @@ _get_repo_status() {
     fi
 
     printf "${C_GREEN}OK${C_RESET}"
+}
+
+# Checks fetch status: contacts remote and checks for unpulled commits
+# @param $1: Repository directory name
+_get_repo_fetch_status() {
+    repo_dir="$1"
+
+    if ! [ -d "$repo_dir" ]; then
+        printf "${C_YELLOW}Not Cloned${C_RESET}"
+        return
+    fi
+
+    # Check if branch tracks a remote
+    if ! git -C "$repo_dir" rev-parse @{u} >/dev/null 2>&1; then
+        printf "${C_RED}No Remote${C_RESET}"
+        return
+    fi
+
+    # Fetch from remote quietly
+    if ! git -C "$repo_dir" fetch --quiet 2>/dev/null; then
+        printf "${C_RED}Fetch Failed${C_RESET}"
+        return
+    fi
+
+    # Check for unpulled commits (commits on remote not in local)
+    unpulled=$(git -C "$repo_dir" log HEAD..@{u} --oneline 2>/dev/null | wc -l)
+    if [ "$unpulled" -gt 0 ]; then
+        printf "${C_RED}%s To Pull${C_RESET}" "$unpulled"
+        return
+    fi
+
+    printf "${C_GREEN}Up to Date${C_RESET}"
 }
 
 
@@ -287,8 +324,6 @@ _read_key() {
         key="push"
     elif [ "$char" = "l" ]; then # NEW: 'l' for Pull
         key="pull"
-    elif [ "$char" = "t" ]; then
-        key="status"
     elif [ "$char" = "k" ]; then
         key="selectnotok"
     # --- End New Shortcuts ---
@@ -296,8 +331,14 @@ _read_key() {
         key="selectall"
     elif [ "$char" = "u" ]; then
         key="unselectall"
+    elif [ "$char" = "t" ]; then
+        key="statusonly"
+    elif [ "$char" = "f" ]; then
+        key="fetchonly"
     elif [ "$char" = "r" ]; then
         key="refresh"
+    elif [ "$char" = "w" ]; then
+        key="editpath"
     elif [ "$char" = "q" ]; then
         key="quit"
     fi
@@ -309,21 +350,41 @@ draw_interface() {
     # Get terminal width (though this fix doesn't need it, it's good practice)
     _t_width=${COLUMNS:-$(tput cols)}
 
-    printf "${C_BOLD}${C_CYAN}╔══════════════════════════════════════════════════════════════════════╗\n"
-    printf "║                               gcl.sh - Git Sync Manager                                ║\n"
-    printf "╚══════════════════════════════════════════════════════════════════════╝${C_RESET}\n"
+    printf "${C_BOLD}${C_CYAN}╔════════════════════════════════════════════════════════════════════════════════════╗\n"
+    printf "║                           gcl.sh - Git Sync Manager                            ║\n"
+    printf "╚════════════════════════════════════════════════════════════════════════════════════╝${C_RESET}\n"
     printf "  Navigate: ↑/↓  Switch: TAB  Toggle: SPACE  Run: ENTER  Quit: q\n"
-    printf "  Repo List:  ${C_BOLD}a${C_RESET}/${C_BOLD}u${C_RESET} (All/None)  ${C_BOLD}k${C_RESET} (Not OK)  ${C_BOLD}r${C_RESET} (Refresh)\n"
-    printf "  Shortcuts:  ${C_BOLD}o${C_RESET}/${C_BOLD}e${C_RESET} (Strategy)  ${C_BOLD}s${C_RESET}/${C_BOLD}p${C_RESET}/${C_BOLD}l${C_RESET}/${C_BOLD}t${C_RESET} (Action)\n\n"
+    printf "  Repo List:  ${C_BOLD}a${C_RESET}/${C_BOLD}u${C_RESET} (All/None)  ${C_BOLD}k${C_RESET} (Not OK)  ${C_BOLD}t${C_RESET} (Status)  ${C_BOLD}f${C_RESET} (Fetch)  ${C_BOLD}r${C_RESET} (Refresh)  ${C_BOLD}w${C_RESET} (Edit Path)\n"
+    printf "  Shortcuts:  Strategy: ${C_BOLD}o${C_RESET} (Local) ${C_BOLD}e${C_RESET} (Remote)  |  Action: ${C_BOLD}s${C_RESET} (Sync) ${C_BOLD}p${C_RESET} (Push) ${C_BOLD}l${C_RESET} (Pull)\n\n\n"
 
+    # --- Working Directory Selection ---
+    _line=9;
+    _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}WORKING DIRECTORY:${C_RESET}"
+
+    _line=$((_line + 1)); _move_cursor $_line 4
+    _line_text=$(printf "[%s] Current Directory (.)" "$([ "$_workdir_selected" -eq 0 ] && printf "●" || printf " ")")
+    if [ "$_current_field" -eq 0 ] && [ "$_workdir_selected" -eq 0 ]; then
+        printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
+    else
+        printf "%s" "$_line_text"
+    fi
+
+    _line=$((_line + 1)); _move_cursor $_line 4
+    _line_text=$(printf "[%s] Custom Path:" "$([ "$_workdir_selected" -eq 1 ] && printf "●" || printf " ")")
+    if [ "$_current_field" -eq 0 ] && [ "$_workdir_selected" -eq 1 ]; then
+        printf "${C_BG_BLUE}%s %s" "$_line_text" "$_workdir_path"; tput el; printf "${C_RESET}"
+    else
+        printf "%s %s" "$_line_text" "$_workdir_path"
+    fi
+    printf "\n"
 
     # --- Strategy Selection (FIXED with tput el) ---
-    _line=7;
+    _line=$((_line + 2));
     _move_cursor $_line 2; printf "${C_BOLD}${C_BLUE}MERGE STRATEGY (On Conflict):${C_RESET}"
 
     _line=$((_line + 1)); _move_cursor $_line 4
     _line_text=$(printf "[%s] L${C_BOLD}O${C_BOLD_OFF}CAL  (Keep local changes)" "$([ "$_strategy_selected" -eq 0 ] && printf "●" || printf " ")")
-    if [ "$_current_field" -eq 0 ] && [ "$_strategy_selected" -eq 0 ]; then
+    if [ "$_current_field" -eq 1 ] && [ "$_strategy_selected" -eq 0 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
         printf "%s" "$_line_text"
@@ -331,7 +392,7 @@ draw_interface() {
 
     _line=$((_line + 1)); _move_cursor $_line 4
     _line_text=$(printf "[%s] R${C_BOLD}E${C_BOLD_OFF}MOTE (Overwrite with remote)" "$([ "$_strategy_selected" -eq 1 ] && printf "●" || printf " ")")
-    if [ "$_current_field" -eq 0 ] && [ "$_strategy_selected" -eq 1 ]; then
+    if [ "$_current_field" -eq 1 ] && [ "$_strategy_selected" -eq 1 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
         printf "%s" "$_line_text"
@@ -343,7 +404,7 @@ draw_interface() {
 
     _line=$((_line + 1)); _move_cursor $_line 4
     _line_text=$(printf "[%s] ${C_BOLD}S${C_BOLD_OFF}YNC   (Remote <-> Local)" "$([ "$_action_selected" -eq 0 ] && printf "●" || printf " ")")
-    if [ "$_current_field" -eq 1 ] && [ "$_action_selected" -eq 0 ]; then
+    if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 0 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
         printf "%s" "$_line_text"
@@ -351,7 +412,7 @@ draw_interface() {
 
     _line=$((_line + 1)); _move_cursor $_line 4
     _line_text=$(printf "[%s] ${C_BOLD}P${C_BOLD_OFF}USH   (Local -> Remote)" "$([ "$_action_selected" -eq 1 ] && printf "●" || printf " ")")
-    if [ "$_current_field" -eq 1 ] && [ "$_action_selected" -eq 1 ]; then
+    if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 1 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
         printf "%s" "$_line_text"
@@ -359,7 +420,7 @@ draw_interface() {
 
     _line=$((_line + 1)); _move_cursor $_line 4
     _line_text=$(printf "[%s] PU${C_BOLD}L${C_BOLD_OFF}L (Remote -> Local)" "$([ "$_action_selected" -eq 2 ] && printf "●" || printf " ")")
-    if [ "$_current_field" -eq 1 ] && [ "$_action_selected" -eq 2 ]; then
+    if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 2 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
         printf "%s" "$_line_text"
@@ -367,7 +428,7 @@ draw_interface() {
 
     _line=$((_line + 1)); _move_cursor $_line 4
     _line_text=$(printf "[%s] S${C_BOLD}T${C_BOLD_OFF}ATUS (Check repos)" "$([ "$_action_selected" -eq 3 ] && printf "●" || printf " ")")
-    if [ "$_current_field" -eq 1 ] && [ "$_action_selected" -eq 3 ]; then
+    if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 3 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
         printf "%s" "$_line_text"
@@ -377,9 +438,10 @@ draw_interface() {
     # --- Repository Selection (FIXED with tput el) ---
     _line=$((_line + 2));
     _move_cursor $_line 2;  printf "${C_BOLD}${C_BLUE}REPOSITORIES (Toggle with SPACE):${C_RESET}"
-    _move_cursor $_line 40; printf "${C_BOLD}${C_BLUE}STATUS:${C_RESET}"
+    _move_cursor $_line 40; printf "${C_BOLD}${C_BLUE}LOCAL STATUS:${C_RESET}"
+    _move_cursor $_line 60; printf "${C_BOLD}${C_BLUE}REMOTE STATUS:${C_RESET}"
 
-    _run_button_line=$((_line + _repo_count + 2))
+    _run_button_line=$((_line + _repo_count + 3))
 
     i=0
     while [ "$i" -lt "$_repo_count" ]; do
@@ -388,20 +450,23 @@ draw_interface() {
         repo_name=$(echo "$_repo_list" | sed -n "$((i + 1))p")
         is_selected=$(echo "$_repo_selection" | cut -c $((i + 1)))
         status_string=$(echo "$_repo_status_list" | sed -n "$((i + 1))p")
+        fetch_status_string=$(echo "$_repo_fetch_status_list" | sed -n "$((i + 1))p")
         marker="$([ "$is_selected" = "y" ] && printf "✓" || printf " ")"
 
         repo_line=$(printf "[%s] %-30.30s" "$marker" "$repo_name")
-        _full_line=$(printf "%s  %s" "$repo_line" "$status_string")
+        _full_line=$(printf "%s  %-18s  %s" "$repo_line" "$status_string" "$fetch_status_string")
 
         _move_cursor $_line 4
-        if [ "$_current_field" -eq 2 ] && [ "$i" -eq "$_repo_cursor_index" ]; then
+        if [ "$_current_field" -eq 3 ] && [ "$i" -eq "$_repo_cursor_index" ]; then
             # This is the new fix: print text, fill line, reset
             printf "${C_BG_BLUE}%s" "$_full_line"; tput el; printf "${C_RESET}"
         else
             # This is the original, correct code for non-selected lines
             printf "%s" "$repo_line"
             _move_cursor $_line 40
-            printf "%s" "$status_string"
+            printf "%-18s" "$status_string"
+            _move_cursor $_line 60
+            printf "%s" "$fetch_status_string"
         fi
 
         i=$((i + 1))
@@ -411,7 +476,7 @@ draw_interface() {
     # --- Execute Button (FIXED with tput el) ---
     _move_cursor $_run_button_line 2
     _line_text="   [ RUN ]"
-    if [ "$_current_field" -eq 3 ]; then
+    if [ "$_current_field" -eq 4 ]; then
         # When selected: green background
         printf "${C_BG_GREEN}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -424,6 +489,36 @@ draw_interface() {
 run_tui_action() {
     _restore_term; _clear_screen
     strategy="theirs"; [ "$_strategy_selected" -eq 0 ] && strategy="ours"
+
+    # Determine working directory
+    if [ "$_workdir_selected" -eq 0 ]; then
+        work_dir="."
+    else
+        work_dir="$_workdir_path"
+    fi
+
+    # Verify working directory exists
+    if [ ! -d "$work_dir" ]; then
+        _error "Working directory does not exist: $work_dir"
+        printf "\n${C_YELLOW}Press 'm' to return to menu or any other key to exit.${C_RESET}\n"
+        read -r choice
+        case "$choice" in
+            m*|M*) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+
+    # Save current directory and change to working directory
+    original_dir=$(pwd)
+    cd "$work_dir" || {
+        _error "Failed to change to working directory: $work_dir"
+        printf "\n${C_YELLOW}Press 'm' to return to menu or any other key to exit.${C_RESET}\n"
+        read -r choice
+        case "$choice" in
+            m*|M*) return 0 ;;
+            *) return 1 ;;
+        esac
+    }
 
     # Build the list of selected repos
     selected_repos=""
@@ -450,6 +545,9 @@ EOF
         esac
     fi
 
+    # Return to original directory
+    cd "$original_dir"
+
     printf "\n${C_GREEN}${C_BOLD}All tasks complete!${C_RESET}\n"
     printf "${C_YELLOW}Press 'm' to return to menu or any other key to exit.${C_RESET}\n"
 
@@ -463,13 +561,65 @@ EOF
     # --- END BUG FIX ---
 }
 
-# --- FUNCTION: To refresh repo statuses ---
+# --- FUNCTION: To refresh repo statuses (both local and remote) ---
 _refresh_repo_statuses() {
+    # Get current working directory
+    if [ "$_workdir_selected" -eq 0 ]; then
+        work_dir="."
+    else
+        work_dir="$_workdir_path"
+    fi
+
     # Temporarily show a loading message
     _clear_screen; _move_cursor 5 5;
-    printf "${C_BOLD}${C_YELLOW}Refreshing repository statuses...${C_RESET}"
+    printf "${C_BOLD}${C_YELLOW}Refreshing all statuses (local + remote fetch)...${C_RESET}"
 
     _repo_status_list=""
+    _repo_fetch_status_list=""
+
+    # Save current directory and change to working directory
+    original_dir=$(pwd)
+    if [ -d "$work_dir" ]; then
+        cd "$work_dir" 2>/dev/null || true
+    fi
+
+    i=1
+    while [ "$i" -le "$_repo_count" ]; do
+        repo_name=$(echo "$_repo_list" | sed -n "${i}p")
+        status=$(_get_repo_status "$repo_name")
+        fetch_status=$(_get_repo_fetch_status "$repo_name")
+        _repo_status_list="${_repo_status_list}${status}
+"
+        _repo_fetch_status_list="${_repo_fetch_status_list}${fetch_status}
+"
+        i=$((i+1))
+    done
+
+    # Return to original directory
+    cd "$original_dir"
+}
+
+# --- FUNCTION: To refresh local status only (no fetch) ---
+_refresh_status_only() {
+    # Get current working directory
+    if [ "$_workdir_selected" -eq 0 ]; then
+        work_dir="."
+    else
+        work_dir="$_workdir_path"
+    fi
+
+    # Temporarily show a loading message
+    _clear_screen; _move_cursor 5 5;
+    printf "${C_BOLD}${C_YELLOW}Refreshing local status only...${C_RESET}"
+
+    _repo_status_list=""
+
+    # Save current directory and change to working directory
+    original_dir=$(pwd)
+    if [ -d "$work_dir" ]; then
+        cd "$work_dir" 2>/dev/null || true
+    fi
+
     i=1
     while [ "$i" -le "$_repo_count" ]; do
         repo_name=$(echo "$_repo_list" | sed -n "${i}p")
@@ -478,6 +628,43 @@ _refresh_repo_statuses() {
 "
         i=$((i+1))
     done
+
+    # Return to original directory
+    cd "$original_dir"
+}
+
+# --- FUNCTION: To refresh fetch status only (no local check) ---
+_refresh_fetch_only() {
+    # Get current working directory
+    if [ "$_workdir_selected" -eq 0 ]; then
+        work_dir="."
+    else
+        work_dir="$_workdir_path"
+    fi
+
+    # Temporarily show a loading message
+    _clear_screen; _move_cursor 5 5;
+    printf "${C_BOLD}${C_YELLOW}Fetching from remote only...${C_RESET}"
+
+    _repo_fetch_status_list=""
+
+    # Save current directory and change to working directory
+    original_dir=$(pwd)
+    if [ -d "$work_dir" ]; then
+        cd "$work_dir" 2>/dev/null || true
+    fi
+
+    i=1
+    while [ "$i" -le "$_repo_count" ]; do
+        repo_name=$(echo "$_repo_list" | sed -n "${i}p")
+        fetch_status=$(_get_repo_fetch_status "$repo_name")
+        _repo_fetch_status_list="${_repo_fetch_status_list}${fetch_status}
+"
+        i=$((i+1))
+    done
+
+    # Return to original directory
+    cd "$original_dir"
 }
 
 
@@ -508,14 +695,14 @@ run_interactive_mode() {
         key=$(_read_key)
         case "$key" in
             up)
-                if [ "$_current_field" -eq 2 ]; then # In repo list
+                if [ "$_current_field" -eq 3 ]; then # In repo list
                     _repo_cursor_index=$(( (_repo_cursor_index - 1 + _repo_count) % _repo_count ))
                 else
                     _current_field=$(((_current_field - 1 + _total_fields) % _total_fields))
                 fi
                 ;;
             down)
-                if [ "$_current_field" -eq 2 ]; then # In repo list
+                if [ "$_current_field" -eq 3 ]; then # In repo list
                     _repo_cursor_index=$(( (_repo_cursor_index + 1) % _repo_count ))
                 else
                     _current_field=$(((_current_field + 1) % _total_fields))
@@ -549,8 +736,29 @@ run_interactive_mode() {
                 done
                 _repo_selection="$new_selection"
                 ;;
-            refresh) # 'r'
+            refresh) # 'r' - Refresh both local status and fetch from remote
                 _refresh_repo_statuses
+                ;;
+            statusonly) # 't' - Status only (local check, no fetch)
+                _refresh_status_only
+                ;;
+            fetchonly) # 'f' - Fetch only (remote check, no local status)
+                _refresh_fetch_only
+                ;;
+            editpath) # 'w'
+                # Allow editing the custom path
+                _restore_term
+                printf "\n${C_BOLD}${C_BLUE}Enter new working directory path:${C_RESET}\n"
+                printf "${C_YELLOW}Current: %s${C_RESET}\n" "$_workdir_path"
+                printf "> "
+                read -r new_path
+                if [ -n "$new_path" ]; then
+                    _workdir_path="$new_path"
+                    _workdir_selected=1  # Switch to custom path
+                    _refresh_repo_statuses
+                fi
+                _save_term
+                stty -icanon -echo
                 ;;
 
             # --- Menu Shortcuts (MODIFIED) ---
@@ -559,13 +767,13 @@ run_interactive_mode() {
             sync)   _action_selected=0 ;; # 's'
             push)   _action_selected=1 ;; # 'p'
             pull)   _action_selected=2 ;; # 'l'
-            status) _action_selected=3 ;; # 't'
 
             space)
                 case "$_current_field" in
-                    0) _strategy_selected=$((1 - _strategy_selected)) ;;
-                    1) _action_selected=$(((_action_selected + 1) % 4)) ;;
-                    2) # Toggle repo selection
+                    0) _workdir_selected=$((1 - _workdir_selected)) ;;
+                    1) _strategy_selected=$((1 - _strategy_selected)) ;;
+                    2) _action_selected=$(((_action_selected + 1) % 4)) ;;
+                    3) # Toggle repo selection
                         current_char=$(echo "$_repo_selection" | cut -c $((_repo_cursor_index + 1)))
                         new_char=$([ "$current_char" = "y" ] && echo "n" || echo "y")
                         _repo_selection=$(echo "$_repo_selection" | sed "s/./$new_char/$((_repo_cursor_index + 1))")
