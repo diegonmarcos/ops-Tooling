@@ -724,13 +724,11 @@ class TUI:
 
     def execute_action(self):
         """Execute the selected action on selected repos"""
-        import sys
-        import tty
-        import termios
-
-        # Restore terminal for command output
+        # Properly end curses mode
         curses.endwin()
 
+        # Clear screen and show header
+        os.system('clear')
         print(f"{Colors.BOLD}{Colors.CYAN}{'═' * 63}{Colors.RESET}")
         print(f"{Colors.BOLD}{Colors.CYAN}                    Executing Actions...                       {Colors.RESET}")
         print(f"{Colors.BOLD}{Colors.CYAN}{'═' * 63}{Colors.RESET}")
@@ -740,18 +738,14 @@ class TUI:
 
         if not Path(work_dir).is_dir():
             error(f"Working directory does not exist: {work_dir}")
-            print(f"\n{Colors.YELLOW}Press any key to return to menu...{Colors.RESET}")
-            sys.stdout.flush()
+            print(f"\n{Colors.YELLOW}Press 'q' to quit or any other key to return to menu.{Colors.RESET}")
 
-            fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(fd)
-            try:
-                tty.setraw(fd)
-                ch = sys.stdin.read(1)
-            finally:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            choice = input()
+            if choice.lower() == 'q':
+                self.running = False
+                return
 
-            print()
+            # Reinitialize curses and return
             self.stdscr = curses.initscr()
             curses.curs_set(0)
             if curses.has_colors():
@@ -781,29 +775,15 @@ class TUI:
                     print(log_msg)
                 print()
 
-        # Refresh statuses after execution
-        print("\nRefreshing repository statuses...")
-        self.refresh_local_status()
-
-        print("\n" + "═" * 60)
+        print(f"\n{Colors.BOLD}{Colors.CYAN}{'═' * 63}{Colors.RESET}")
         print(f"{Colors.GREEN}{Colors.BOLD}                  All tasks complete!                          {Colors.RESET}")
-        print("═" * 60)
-        print(f"\n{Colors.YELLOW}Press 'q' to quit or any other key to return to menu...{Colors.RESET}")
-        sys.stdout.flush()
+        print(f"{Colors.BOLD}{Colors.CYAN}{'═' * 63}{Colors.RESET}")
+        print(f"\n{Colors.YELLOW}Press 'q' to quit or any other key to return to menu.{Colors.RESET}")
 
-        # Get user input with proper terminal handling
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        try:
-            tty.setraw(fd)
-            ch = sys.stdin.read(1)
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        # Wait for user input (requires pressing Enter, just like gcl.sh)
+        choice = input()
 
-        # Print newline after input
-        print()
-
-        if ch == 'q' or ch == 'Q':
+        if choice.lower() == 'q':
             self.running = False
         else:
             # Reinitialize curses
