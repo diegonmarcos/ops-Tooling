@@ -2,7 +2,7 @@
 Categories=Development;
 Comment[en_US]=Launches the GitSyncMan shell script in a terminal
 Comment=Launches the GitSyncMan shell script in a terminal
-Exec=/home/diego/Documents/Git/ops-Tooling/Git/gcl.py
+Exec=/home/diego/Documents/Git/ops-Tooling/Git/gcl_py.sh
 GenericName[en_US]=
 GenericName=
 Icon=ring

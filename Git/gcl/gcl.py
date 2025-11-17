@@ -581,7 +581,7 @@ class TUI:
         col += 10
         self.stdscr.addstr(row, col, "k", curses.color_pair(5) | curses.A_BOLD)
         col += 1
-        self.stdscr.addstr(row, col, ") Not OK")
+        self.stdscr.addstr(row, col, ") Needs Update")
         row += 1
 
         # Strategy line
@@ -684,9 +684,11 @@ class TUI:
         elif key == ord('u'):  # Unselect all
             self.repo_selection = [False] * len(self.repos)
 
-        elif key == ord('k'):  # Select not OK
+        elif key == ord('k'):  # Select repos that need updates
             for i in range(len(self.repos)):
-                if self.repo_local_status[i] != "OK":
+                local_needs_update = self.repo_local_status[i] not in ["OK"]
+                remote_needs_update = self.repo_remote_status[i] not in ["Up to Date", "Not Checked"]
+                if local_needs_update or remote_needs_update:
                     self.repo_selection[i] = True
                 else:
                     self.repo_selection[i] = False
