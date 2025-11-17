@@ -138,10 +138,13 @@ def process_repo(repo_dir: str, repo_url: str, strategy: str, action: str, work_
     if not Path(repo_path).is_dir():
         logs.append(f"  Cloning '{repo_dir}'...")
         ret, output = run_git(work_dir, 'clone', repo_url, repo_dir)
+        if output.strip():
+            for line in output.strip().split('\n'):
+                logs.append(f"    {line}")
         if ret == 0:
             logs.append(f"  ✓ Clone complete.")
         else:
-            logs.append(f"  ✗ Clone failed: {output}")
+            logs.append(f"  ✗ Clone failed.")
         return logs
 
     if action == 'sync':
@@ -150,7 +153,10 @@ def process_repo(repo_dir: str, repo_url: str, strategy: str, action: str, work_
         if ret != 0:
             logs.append("  Found uncommitted changes, committing before pull...")
             run_git(repo_path, 'add', '.')
-            ret, _ = run_git(repo_path, 'commit', '-q', '-m', 'Auto-commit before pull')
+            ret, output = run_git(repo_path, 'commit', '-m', 'Auto-commit before pull')
+            if output.strip():
+                for line in output.strip().split('\n'):
+                    logs.append(f"    {line}")
             if ret == 0:
                 logs.append("  ✓ Changes committed.")
             else:
@@ -160,6 +166,9 @@ def process_repo(repo_dir: str, repo_url: str, strategy: str, action: str, work_
         # Pull
         logs.append(f"  Pulling with strategy: {strategy}")
         ret, output = run_git(repo_path, 'pull', '--no-rebase', f'--strategy-option={strategy}')
+        if output.strip():
+            for line in output.strip().split('\n'):
+                logs.append(f"    {line}")
         if ret == 0:
             logs.append("  ✓ Pull complete.")
 
@@ -168,31 +177,43 @@ def process_repo(repo_dir: str, repo_url: str, strategy: str, action: str, work_
             ret, _ = run_git(repo_path, 'diff-index', '--quiet', '--cached', 'HEAD', '--')
             if ret != 0:
                 logs.append("  Found changes, committing with default message 'fixes'...")
-                ret, _ = run_git(repo_path, 'commit', '-q', '-m', 'fixes')
+                ret, output = run_git(repo_path, 'commit', '-m', 'fixes')
+                if output.strip():
+                    for line in output.strip().split('\n'):
+                        logs.append(f"    {line}")
                 if ret == 0:
                     logs.append("  ✓ Commit complete.")
 
             # Push
             logs.append("  Pushing changes...")
-            ret, _ = run_git(repo_path, 'push')
+            ret, output = run_git(repo_path, 'push')
+            if output.strip():
+                for line in output.strip().split('\n'):
+                    logs.append(f"    {line}")
             if ret == 0:
                 logs.append("  ✓ Push complete.")
             else:
                 logs.append("  ✗ Push failed.")
         else:
-            logs.append(f"  ✗ Pull failed: {output[:200]}")
+            logs.append(f"  ✗ Pull failed.")
 
     elif action == 'push':
         run_git(repo_path, 'add', '.')
         ret, _ = run_git(repo_path, 'diff-index', '--quiet', '--cached', 'HEAD', '--')
         if ret != 0:
             logs.append("  Found changes, committing with default message 'fixes'...")
-            ret, _ = run_git(repo_path, 'commit', '-q', '-m', 'fixes')
+            ret, output = run_git(repo_path, 'commit', '-m', 'fixes')
+            if output.strip():
+                for line in output.strip().split('\n'):
+                    logs.append(f"    {line}")
             if ret == 0:
                 logs.append("  ✓ Commit complete.")
 
         logs.append("  Pushing changes...")
-        ret, _ = run_git(repo_path, 'push')
+        ret, output = run_git(repo_path, 'push')
+        if output.strip():
+            for line in output.strip().split('\n'):
+                logs.append(f"    {line}")
         if ret == 0:
             logs.append("  ✓ Push complete.")
         else:
@@ -204,16 +225,22 @@ def process_repo(repo_dir: str, repo_url: str, strategy: str, action: str, work_
         if ret != 0:
             logs.append("  Found uncommitted changes, committing before pull...")
             run_git(repo_path, 'add', '.')
-            ret, _ = run_git(repo_path, 'commit', '-q', '-m', 'Auto-commit before pull')
+            ret, output = run_git(repo_path, 'commit', '-m', 'Auto-commit before pull')
+            if output.strip():
+                for line in output.strip().split('\n'):
+                    logs.append(f"    {line}")
             if ret == 0:
                 logs.append("  ✓ Changes committed.")
 
         logs.append(f"  Pulling with strategy: {strategy}")
         ret, output = run_git(repo_path, 'pull', '--no-rebase', f'--strategy-option={strategy}')
+        if output.strip():
+            for line in output.strip().split('\n'):
+                logs.append(f"    {line}")
         if ret == 0:
             logs.append("  ✓ Pull complete.")
         else:
-            logs.append(f"  ✗ Pull failed: {output[:200]}")
+            logs.append(f"  ✗ Pull failed.")
 
     elif action == 'status':
         logs.append(f"  Checking '{repo_dir}'")
@@ -242,7 +269,10 @@ def process_repo(repo_dir: str, repo_url: str, strategy: str, action: str, work_
 
     elif action == 'fetch':
         logs.append(f"  Fetching in '{repo_dir}'...")
-        ret, _ = run_git(repo_path, 'fetch')
+        ret, output = run_git(repo_path, 'fetch')
+        if output.strip():
+            for line in output.strip().split('\n'):
+                logs.append(f"    {line}")
         if ret == 0:
             logs.append("  ✓ Fetch complete.")
         else:

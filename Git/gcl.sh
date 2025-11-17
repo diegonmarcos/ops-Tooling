@@ -1,10 +1,11 @@
 #!/bin/sh
-# gcl.sh - Unified launcher for gcl.py
+# gcl.sh - Unified launcher for gcl
 # Usage:
-#   ./gcl.sh [command]           # Run natively (default)
-#   ./gcl.sh --docker [command]  # Use Docker mode
-#   ./gcl.sh --venv [command]    # Use venv mode
-#   ./gcl.sh --help              # Show help
+#   ./gcl.sh [command]              # Run natively (default)
+#   ./gcl.sh --venv [command]       # Use venv mode
+#   ./gcl.sh --py_docker [command]  # Use Docker mode
+#   ./gcl.sh --sh [command]         # Use shell POSIX script
+#   ./gcl.sh --help                 # Show help
 
 set -e
 
@@ -15,38 +16,60 @@ C_RESET="\033[0m"
 C_BOLD="\033[1m"
 C_GREEN="\033[32m"
 C_CYAN="\033[36m"
+C_YELLOW="\033[33m"
+C_PURPLE="\033[38;5;141m"
+C_GRAY="\033[90m"
 
 # Show help
 show_help() {
-    printf "${C_BOLD}${C_CYAN}gcl.sh - Git Clone/Pull/Push Manager Launcher${C_RESET}\n\n"
-    printf "${C_BOLD}USAGE:${C_RESET}\n"
-    printf "  ./gcl.sh [OPTIONS] [COMMAND] [ARGS...]\n\n"
-    printf "${C_BOLD}MODES:${C_RESET}\n"
-    printf "  ${C_GREEN}--native${C_RESET}       Run directly with Python (default)\n"
-    printf "  ${C_GREEN}--docker${C_RESET}       Run in Docker container (auto-builds if needed)\n"
-    printf "  ${C_GREEN}--venv${C_RESET}         Run in Python virtual environment (auto-setups if needed)\n\n"
-    printf "${C_BOLD}OPTIONS:${C_RESET}\n"
-    printf "  ${C_GREEN}--help, -h${C_RESET}    Show this help message\n\n"
-    printf "${C_BOLD}SETUP:${C_RESET}\n"
-    printf "  ${C_GREEN}--venv${C_RESET} mode will automatically setup the virtual environment on first run\n"
-    printf "  ${C_GREEN}--docker${C_RESET} mode will automatically build the image on first run\n"
-    printf "  ${C_GREEN}--native${C_RESET} mode requires Python 3 to be installed on your system\n\n"
-    printf "${C_BOLD}COMMANDS:${C_RESET}\n"
-    printf "  ${C_GREEN}(no command)${C_RESET}  Launch interactive TUI\n"
-    printf "  ${C_GREEN}sync${C_RESET}          Bidirectional sync\n"
-    printf "  ${C_GREEN}push${C_RESET}          Push changes\n"
-    printf "  ${C_GREEN}pull${C_RESET}          Pull changes\n"
-    printf "  ${C_GREEN}status${C_RESET}        Check repository status\n"
-    printf "  ${C_GREEN}fetch${C_RESET}         Fetch from remote\n"
-    printf "  ${C_GREEN}untracked${C_RESET}     List untracked files\n"
-    printf "  ${C_GREEN}ignored${C_RESET}       List ignored files\n"
-    printf "  ${C_GREEN}help${C_RESET}          Show gcl.py help\n\n"
-    printf "${C_BOLD}EXAMPLES:${C_RESET}\n"
-    printf "  ./gcl.sh                    ${C_CYAN}# Run TUI natively${C_RESET}\n"
-    printf "  ./gcl.sh status             ${C_CYAN}# Check status (native)${C_RESET}\n"
-    printf "  ./gcl.sh --docker           ${C_CYAN}# Run TUI in Docker${C_RESET}\n"
-    printf "  ./gcl.sh --docker status    ${C_CYAN}# Check status in Docker${C_RESET}\n"
-    printf "  ./gcl.sh --venv sync        ${C_CYAN}# Sync using venv (auto-setup)${C_RESET}\n"
+    printf "\n"
+    printf "${C_BOLD}${C_CYAN}╔════════════════════════════════════════════════════════════╗${C_RESET}\n"
+    printf "${C_BOLD}${C_CYAN}║                                                            ║${C_RESET}\n"
+    printf "${C_BOLD}${C_CYAN}║     gcl.sh - Git Clone/Pull/Push Manager Launcher          ║${C_RESET}\n"
+    printf "${C_BOLD}${C_CYAN}║                                                            ║${C_RESET}\n"
+    printf "${C_BOLD}${C_CYAN}╚════════════════════════════════════════════════════════════╝${C_RESET}\n\n"
+
+    printf "${C_BOLD}SYNTAX${C_RESET}\n"
+    printf "${C_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
+    printf "  sh gcl.sh [${C_YELLOW}--MODE${C_RESET}] [${C_PURPLE}ACTIONS${C_RESET}]\n\n"
+
+    printf "${C_BOLD}MODES${C_RESET}\n"
+    printf "${C_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
+    printf "  ${C_GREEN}(no mode)${C_RESET}                   ${C_GRAY}Run directly with Python (default)${C_RESET}\n"
+    printf "  ${C_YELLOW}--venv${C_RESET}                      ${C_GRAY}Run in Python virtual environment (auto-setups if needed)${C_RESET}\n"
+    printf "  ${C_YELLOW}--py_docker${C_RESET}                 ${C_GRAY}Run in Docker container (auto-builds if needed)${C_RESET}\n"
+    printf "  ${C_YELLOW}--sh${C_RESET}                        ${C_GRAY}Run the shell POSIX script${C_RESET}\n\n"
+
+    printf "${C_BOLD}ACTIONS${C_RESET}\n"
+    printf "${C_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
+    printf "  ${C_PURPLE}(no command)${C_RESET}                ${C_GRAY}Launch interactive TUI${C_RESET}\n"
+    printf "  ${C_PURPLE}sync${C_RESET}                        ${C_GRAY}Bidirectional sync${C_RESET}\n"
+    printf "  ${C_PURPLE}push${C_RESET}                        ${C_GRAY}Push changes${C_RESET}\n"
+    printf "  ${C_PURPLE}pull${C_RESET}                        ${C_GRAY}Pull changes${C_RESET}\n"
+    printf "  ${C_PURPLE}status${C_RESET}                      ${C_GRAY}Check repository status${C_RESET}\n"
+    printf "  ${C_PURPLE}fetch${C_RESET}                       ${C_GRAY}Fetch from remote${C_RESET}\n"
+    printf "  ${C_PURPLE}untracked${C_RESET}                   ${C_GRAY}List untracked files${C_RESET}\n"
+    printf "  ${C_PURPLE}ignored${C_RESET}                     ${C_GRAY}List ignored files${C_RESET}\n"
+    printf "  ${C_PURPLE}help${C_RESET}                        ${C_GRAY}Show gcl.py help${C_RESET}\n\n\n"
+
+    printf "${C_BOLD}EXAMPLES${C_RESET}\n"
+    printf "${C_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
+    printf "  ./gcl.sh                    ${C_GRAY}# Run TUI natively${C_RESET}\n"
+    printf "  ./gcl.sh --venv             ${C_GRAY}# Run TUI natively (venv)${C_RESET}\n"
+    printf "  ./gcl.sh --py_docker        ${C_GRAY}# Run TUI in Docker${C_RESET}\n"
+    printf "  ./gcl.sh --sh               ${C_GRAY}# Run TUI in sh Posix${C_RESET}\n\n"
+    printf "  ./gcl.sh status             ${C_GRAY}# Check status (native)${C_RESET}\n"
+    printf "  ./gcl.sh --venv status      ${C_GRAY}# Check status (venv)${C_RESET}\n\n\n"
+
+    printf "${C_BOLD}OPTIONS${C_RESET}\n"
+    printf "${C_GRAY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
+    printf "  ${C_GREEN}--help, -h${C_RESET}                  ${C_GRAY}Show this help message${C_RESET}\n\n"
+
+    printf "${C_BOLD}SETUP${C_RESET}\n"
+    printf "${C_GRAY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
+    printf "  --venv                      ${C_GRAY}Mode will automatically setup the virtual environment on first run${C_RESET}\n"
+    printf "  --py_docker                 ${C_GRAY}Mode will automatically build the image on first run${C_RESET}\n"
+    printf "  (no mode)                   ${C_GRAY}Requires Python 3 to be installed on your system${C_RESET}\n\n"
 }
 
 # Run natively
@@ -101,19 +124,28 @@ run_venv() {
     "$VENV_SCRIPT" run "$@"
 }
 
+# Run via shell script
+run_sh() {
+    "$SCRIPT_DIR/gcl/gcl.sh" "$@"
+}
+
 # Main
 case "${1:-}" in
     --help|-h)
         show_help
         exit 0
         ;;
-    --docker)
+    --py_docker|--docker)
         shift
         run_docker "$@"
         ;;
     --venv)
         shift
         run_venv "$@"
+        ;;
+    --sh)
+        shift
+        run_sh "$@"
         ;;
     --native)
         shift
