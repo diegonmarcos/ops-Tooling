@@ -35,45 +35,61 @@ show_help() {
 
     printf "${C_BOLD}MODES${C_RESET}\n"
     printf "${C_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
-    printf "  ${C_GREEN}(no mode)${C_RESET}                   ${C_GRAY}Run directly with Python (default)${C_RESET}\n"
-    printf "  ${C_YELLOW}--venv${C_RESET}                      ${C_GRAY}Run in Python virtual environment (auto-setups if needed)${C_RESET}\n"
-    printf "  ${C_YELLOW}--py_docker${C_RESET}                 ${C_GRAY}Run in Docker container (auto-builds if needed)${C_RESET}\n"
-    printf "  ${C_YELLOW}--sh${C_RESET}                        ${C_GRAY}Run the shell POSIX script${C_RESET}\n\n"
+    printf "  ${C_GREEN}(no mode)${C_RESET}\t\t\t${C_GRAY}Run directly with Python (default)${C_RESET}\n"
+    printf "  ${C_YELLOW}--venv${C_RESET}\t\t\t${C_GRAY}Run in Python virtual environment (auto-setups if needed)${C_RESET}\n"
+    printf "  ${C_YELLOW}--py_docker${C_RESET}\t\t\t${C_GRAY}Run in Docker container (auto-builds if needed)${C_RESET}\n"
+    printf "  ${C_YELLOW}--sh${C_RESET}\t\t\t\t${C_GRAY}Run the shell POSIX script${C_RESET}\n\n"
 
     printf "${C_BOLD}ACTIONS${C_RESET}\n"
     printf "${C_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
-    printf "  ${C_PURPLE}(no command)${C_RESET}                ${C_GRAY}Launch interactive TUI${C_RESET}\n"
-    printf "  ${C_PURPLE}sync${C_RESET}                        ${C_GRAY}Bidirectional sync${C_RESET}\n"
-    printf "  ${C_PURPLE}push${C_RESET}                        ${C_GRAY}Push changes${C_RESET}\n"
-    printf "  ${C_PURPLE}pull${C_RESET}                        ${C_GRAY}Pull changes${C_RESET}\n"
-    printf "  ${C_PURPLE}status${C_RESET}                      ${C_GRAY}Check repository status${C_RESET}\n"
-    printf "  ${C_PURPLE}fetch${C_RESET}                       ${C_GRAY}Fetch from remote${C_RESET}\n"
-    printf "  ${C_PURPLE}untracked${C_RESET}                   ${C_GRAY}List untracked files${C_RESET}\n"
-    printf "  ${C_PURPLE}ignored${C_RESET}                     ${C_GRAY}List ignored files${C_RESET}\n"
-    printf "  ${C_PURPLE}help${C_RESET}                        ${C_GRAY}Show gcl.py help${C_RESET}\n\n\n"
+    printf "  ${C_PURPLE}(no command)${C_RESET}\t\t\t${C_GRAY}Launch interactive TUI${C_RESET}\n\n"
+    printf "  ${C_PURPLE}sync${C_RESET}\t\t\t\t${C_GRAY}Sync (Commit Local, Fetch, Pull w/ Strategy, Commit Merge, Push)${C_RESET}\n"
+    printf "  ${C_PURPLE}fetch${C_RESET}\t\t\t\t${C_GRAY}Fetch from remote${C_RESET}\n"
+    printf "  ${C_PURPLE}push${C_RESET}\t\t\t\t${C_GRAY}Push changes with Merge Strategy Default${C_RESET}\n"
+    printf "  ${C_PURPLE}pull${C_RESET}\t\t\t\t${C_GRAY}Pull changes with Merge Strategy Default${C_RESET}\n\n"
+    printf "  ${C_PURPLE}status${C_RESET}\t\t\t${C_GRAY}Check repository status${C_RESET}\n"
+    printf "  ${C_PURPLE}untracked${C_RESET}\t\t\t${C_GRAY}List untracked files${C_RESET}\n"
+    printf "  ${C_PURPLE}ignored${C_RESET}\t\t\t${C_GRAY}List ignored files${C_RESET}\n\n\n"
 
     printf "${C_BOLD}EXAMPLES${C_RESET}\n"
     printf "${C_GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
-    printf "  ./gcl.sh                    ${C_GRAY}# Run TUI natively${C_RESET}\n"
-    printf "  ./gcl.sh --venv             ${C_GRAY}# Run TUI natively (venv)${C_RESET}\n"
-    printf "  ./gcl.sh --py_docker        ${C_GRAY}# Run TUI in Docker${C_RESET}\n"
-    printf "  ./gcl.sh --sh               ${C_GRAY}# Run TUI in sh Posix${C_RESET}\n\n"
-    printf "  ./gcl.sh status             ${C_GRAY}# Check status (native)${C_RESET}\n"
-    printf "  ./gcl.sh --venv status      ${C_GRAY}# Check status (venv)${C_RESET}\n\n\n"
+    printf "  ./gcl.sh\t\t\t${C_GRAY}# Run TUI natively${C_RESET}\n"
+    printf "  ./gcl.sh --venv\t\t${C_GRAY}# Run TUI natively (venv)${C_RESET}\n"
+    printf "  ./gcl.sh --py_docker\t\t${C_GRAY}# Run TUI in Docker${C_RESET}\n"
+    printf "  ./gcl.sh --sh\t\t\t${C_GRAY}# Run TUI in sh Posix${C_RESET}\n\n"
+    printf "  ./gcl.sh status\t\t${C_GRAY}# Check status (native)${C_RESET}\n"
+    printf "  ./gcl.sh --venv status\t${C_GRAY}# Check status (venv)${C_RESET}\n\n\n"
 
     printf "${C_BOLD}OPTIONS${C_RESET}\n"
     printf "${C_GRAY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
-    printf "  ${C_GREEN}--help, -h${C_RESET}                  ${C_GRAY}Show this help message${C_RESET}\n\n"
+    printf "  ${C_GREEN}--help, -h${C_RESET}\t\t\t${C_GRAY}Show this help message${C_RESET}\n\n"
 
     printf "${C_BOLD}SETUP${C_RESET}\n"
     printf "${C_GRAY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
-    printf "  --venv                      ${C_GRAY}Mode will automatically setup the virtual environment on first run${C_RESET}\n"
-    printf "  --py_docker                 ${C_GRAY}Mode will automatically build the image on first run${C_RESET}\n"
-    printf "  (no mode)                   ${C_GRAY}Requires Python 3 to be installed on your system${C_RESET}\n\n"
+    printf "  --venv\t\t\t${C_GRAY}Mode will setup the virtual environment on first run${C_RESET}\n"
+    printf "  --py_docker\t\t\t${C_GRAY}Mode will automatically build the image on first run${C_RESET}\n"
+    printf "  (no mode)\t\t\t${C_GRAY}Requires Python 3 to be installed on your system${C_RESET}\n"
+    printf "  MERGE\t\t\t\t${C_GRAY}Merge Strategy Default is: remote (theirs)${C_RESET}\n"
+    printf "  UI\t\t\t\t${C_GRAY}Designed for Half-Full-screen (80x24 terminal, 640x400 px)${C_RESET}\n\n"
 }
 
 # Run natively
 run_native() {
+    # Check if command is valid (if provided)
+    if [ $# -gt 0 ]; then
+        case "${1}" in
+            sync|fetch|push|pull|status|untracked|ignored|help)
+                # Valid command, proceed
+                ;;
+            *)
+                # Unknown command, show help
+                printf "\n${C_BOLD}${C_YELLOW}Unknown command: ${1}${C_RESET}\n\n"
+                show_help
+                exit 1
+                ;;
+        esac
+    fi
+
     # Check terminal size for TUI mode
     if [ $# -eq 0 ]; then
         # Only check terminal for TUI mode (no args)

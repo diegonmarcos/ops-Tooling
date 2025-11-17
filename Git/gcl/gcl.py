@@ -151,9 +151,9 @@ def process_repo(repo_dir: str, repo_url: str, strategy: str, action: str, work_
         # Commit uncommitted changes
         ret, _ = run_git(repo_path, 'diff-index', '--quiet', 'HEAD', '--')
         if ret != 0:
-            logs.append("  Found uncommitted changes, committing before pull...")
+            logs.append("  Found uncommitted changes, committing before sync...")
             run_git(repo_path, 'add', '.')
-            ret, output = run_git(repo_path, 'commit', '-m', 'Auto-commit before pull')
+            ret, output = run_git(repo_path, 'commit', '-m', 'Auto-commit before sync')
             if output.strip():
                 for line in output.strip().split('\n'):
                     logs.append(f"    {line}")
@@ -162,6 +162,18 @@ def process_repo(repo_dir: str, repo_url: str, strategy: str, action: str, work_
             else:
                 logs.append("  ✗ Commit failed.")
                 return logs
+
+        # Fetch from remote
+        logs.append("  Fetching latest changes from remote...")
+        ret, output = run_git(repo_path, 'fetch')
+        if output.strip():
+            for line in output.strip().split('\n'):
+                logs.append(f"    {line}")
+        if ret == 0:
+            logs.append("  ✓ Fetch complete.")
+        else:
+            logs.append("  ✗ Fetch failed.")
+            return logs
 
         # Pull
         logs.append(f"  Pulling with strategy: {strategy}")
@@ -433,19 +445,19 @@ class TUI:
         # Action
         self.stdscr.addstr(row, 2, "ACTION:", curses.color_pair(2) | curses.A_BOLD)
         row += 1
-        self.stdscr.addstr(row, 2, "═══════", curses.color_pair(2))
+        self.stdscr.addstr(row, 2, "══════", curses.color_pair(2))
         row += 1
 
-        # Actions with highlighted shortcut letters
+        # Actions with new layout and order
         actions_data = [
-            (0, "SYNC   (Remote <-> Local)", "S", 0),
-            (1, "PUSH   (Local -> Remote)", "P", 0),
-            (2, "PULL   (Remote -> Local)", "PU", "L", "L (Remote -> Local)"),
+            (0, "SYNC", "S", "(Commit, Fetch, Pull, Commit, Push)"),
+            (1, "FETCH", "F", "(Get from Remote)"),
+            (2, "PULL", "L", "(Merge from Remote)"),
+            (3, "PUSH", "P", "(Merge from Local)"),
             (None, None, None, None),  # blank line
-            (3, "STATUS (Check repos)", "S", "T", "ATUS (Check repos)"),
-            (4, "FETCH  (Fetch from remote)", "F", 0),
-            (5, "UNTRACKED (List untracked files)", "U", "N", "TRACKED (List untracked files)"),
-            (6, "IGNORED (List ignored files)", "I", 0),
+            (4, "STATUS", "T", "(Check Local Uncommitted)"),
+            (5, "UNTRACKED", "N", "(List untracked files)"),
+            (6, "IGNORED", "I", "(List ignored files)"),
         ]
 
         for action_info in actions_data:
@@ -454,42 +466,35 @@ class TUI:
                 continue
 
             action_idx = action_info[0]
+            action_name = action_info[1]
+            shortcut = action_info[2]
+            description = action_info[3]
+
             marker = '●' if self.action_selected == action_idx else ' '
             attr = curses.color_pair(6) if self.current_field == 2 and self.action_selected == action_idx else curses.A_NORMAL
 
             # If this action is currently selected, use solid highlight
             if self.current_field == 2 and self.action_selected == action_idx:
-                self.stdscr.addstr(row, 4, f"[{marker}] {action_info[1]}", attr)
+                self.stdscr.addstr(row, 4, f"[{marker}] {action_name:<10} {description}", attr)
             else:
                 # Draw with highlighted shortcut letter
-                if action_idx == 0:  # SYNC
-                    self.stdscr.addstr(row, 4, f"[{marker}] ")
-                    self.stdscr.addstr(row, 8, "S", curses.color_pair(5) | curses.A_BOLD)
-                    self.stdscr.addstr(row, 9, "YNC   (Remote <-> Local)")
-                elif action_idx == 1:  # PUSH
-                    self.stdscr.addstr(row, 4, f"[{marker}] ")
-                    self.stdscr.addstr(row, 8, "P", curses.color_pair(5) | curses.A_BOLD)
-                    self.stdscr.addstr(row, 9, "USH   (Local -> Remote)")
-                elif action_idx == 2:  # PULL
-                    self.stdscr.addstr(row, 4, f"[{marker}] PU")
-                    self.stdscr.addstr(row, 10, "L", curses.color_pair(5) | curses.A_BOLD)
-                    self.stdscr.addstr(row, 11, "L   (Remote -> Local)")
-                elif action_idx == 3:  # STATUS
-                    self.stdscr.addstr(row, 4, f"[{marker}] S")
-                    self.stdscr.addstr(row, 9, "T", curses.color_pair(5) | curses.A_BOLD)
-                    self.stdscr.addstr(row, 10, "ATUS (Check repos)")
-                elif action_idx == 4:  # FETCH
-                    self.stdscr.addstr(row, 4, f"[{marker}] ")
-                    self.stdscr.addstr(row, 8, "F", curses.color_pair(5) | curses.A_BOLD)
-                    self.stdscr.addstr(row, 9, "ETCH  (Fetch from remote)")
-                elif action_idx == 5:  # UNTRACKED
-                    self.stdscr.addstr(row, 4, f"[{marker}] U")
-                    self.stdscr.addstr(row, 9, "N", curses.color_pair(5) | curses.A_BOLD)
-                    self.stdscr.addstr(row, 10, "TRACKED (List untracked files)")
-                elif action_idx == 6:  # IGNORED
-                    self.stdscr.addstr(row, 4, f"[{marker}] ")
-                    self.stdscr.addstr(row, 8, "I", curses.color_pair(5) | curses.A_BOLD)
-                    self.stdscr.addstr(row, 9, "GNORED (List ignored files)")
+                self.stdscr.addstr(row, 4, f"[{marker}] ")
+
+                # Find position of shortcut letter in action name
+                shortcut_pos = action_name.find(shortcut)
+                if shortcut_pos >= 0:
+                    # Draw text before shortcut
+                    if shortcut_pos > 0:
+                        self.stdscr.addstr(row, 8, action_name[:shortcut_pos])
+                    # Draw shortcut in bold yellow
+                    self.stdscr.addstr(row, 8 + shortcut_pos, shortcut, curses.color_pair(5) | curses.A_BOLD)
+                    # Draw text after shortcut
+                    if shortcut_pos + 1 < len(action_name):
+                        self.stdscr.addstr(row, 8 + shortcut_pos + 1, action_name[shortcut_pos + 1:])
+                    # Draw description
+                    self.stdscr.addstr(row, 8 + len(action_name) + 1, description)
+                else:
+                    self.stdscr.addstr(row, 8, f"{action_name} {description}")
             row += 1
 
         row += 2
@@ -611,7 +616,7 @@ class TUI:
         col += 10
         self.stdscr.addstr(row, col, "k", curses.color_pair(5) | curses.A_BOLD)
         col += 1
-        self.stdscr.addstr(row, col, ") Needs Update")
+        self.stdscr.addstr(row, col, ") Smart Select")
         row += 1
 
         # Strategy line
@@ -635,31 +640,31 @@ class TUI:
         col += 1
         self.stdscr.addstr(row, col, ") Sync | (")
         col += 10
-        self.stdscr.addstr(row, col, "p", curses.color_pair(5) | curses.A_BOLD)
+        self.stdscr.addstr(row, col, "f", curses.color_pair(5) | curses.A_BOLD)
         col += 1
-        self.stdscr.addstr(row, col, ") Push | (")
-        col += 10
+        self.stdscr.addstr(row, col, ") Fetch | (")
+        col += 11
         self.stdscr.addstr(row, col, "l", curses.color_pair(5) | curses.A_BOLD)
         col += 1
         self.stdscr.addstr(row, col, ") Pull | (")
         col += 10
-        self.stdscr.addstr(row, col, "f", curses.color_pair(5) | curses.A_BOLD)
+        self.stdscr.addstr(row, col, "p", curses.color_pair(5) | curses.A_BOLD)
         col += 1
-        self.stdscr.addstr(row, col, ") Fetch")
+        self.stdscr.addstr(row, col, ") Push")
         row += 1
 
         # Actions continued line
         col = 12
         self.stdscr.addstr(row, col, "(")
         col += 1
+        self.stdscr.addstr(row, col, "t", curses.color_pair(5) | curses.A_BOLD)
+        col += 1
+        self.stdscr.addstr(row, col, ") Status | (")
+        col += 13
         self.stdscr.addstr(row, col, "n", curses.color_pair(5) | curses.A_BOLD)
         col += 1
         self.stdscr.addstr(row, col, ") Untracked | (")
         col += 15
-        self.stdscr.addstr(row, col, "t", curses.color_pair(5) | curses.A_BOLD)
-        col += 1
-        self.stdscr.addstr(row, col, ") Status | (")
-        col += 12
         self.stdscr.addstr(row, col, "r", curses.color_pair(5) | curses.A_BOLD)
         col += 1
         self.stdscr.addstr(row, col, ") Refresh")
@@ -714,14 +719,24 @@ class TUI:
         elif key == ord('u'):  # Unselect all
             self.repo_selection = [False] * len(self.repos)
 
-        elif key == ord('k'):  # Select repos that need updates
+        elif key == ord('k'):  # Select repos that need updates (smart selection)
+            has_remote_updates = False
             for i in range(len(self.repos)):
                 local_needs_update = self.repo_local_status[i] not in ["OK"]
                 remote_needs_update = self.repo_remote_status[i] not in ["Up to Date", "Not Checked"]
                 if local_needs_update or remote_needs_update:
                     self.repo_selection[i] = True
+                    # Track if any selected repo has remote updates
+                    if remote_needs_update:
+                        has_remote_updates = True
                 else:
                     self.repo_selection[i] = False
+
+            # Smart action selection: sync if remote updates exist, otherwise push
+            if has_remote_updates:
+                self.action_selected = 0  # Sync
+            else:
+                self.action_selected = 3  # Push
 
         elif key == ord('o'):  # Local strategy
             self.strategy_selected = 0
@@ -732,19 +747,19 @@ class TUI:
         elif key == ord('s'):  # Sync action
             self.action_selected = 0
 
-        elif key == ord('p'):  # Push action
+        elif key == ord('f'):  # Fetch action
             self.action_selected = 1
+            self.refresh_remote_status()
 
         elif key == ord('l'):  # Pull action
             self.action_selected = 2
 
-        elif key == ord('t'):  # Status action
+        elif key == ord('p'):  # Push action
             self.action_selected = 3
-            self.refresh_local_status()
 
-        elif key == ord('f'):  # Fetch action
+        elif key == ord('t'):  # Status action
             self.action_selected = 4
-            self.refresh_remote_status()
+            self.refresh_local_status()
 
         elif key == ord('n'):  # Untracked action
             self.action_selected = 5
@@ -800,7 +815,7 @@ class TUI:
             return
 
         strategy = 'ours' if self.strategy_selected == 0 else 'theirs'
-        action_names = ['sync', 'push', 'pull', 'status', 'fetch', 'untracked', 'ignored']
+        action_names = ['sync', 'fetch', 'pull', 'push', 'status', 'untracked', 'ignored']
         action = action_names[self.action_selected]
 
         selected_repos = [self.repos[i] for i in range(len(self.repos)) if self.repo_selection[i]]
