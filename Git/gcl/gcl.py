@@ -69,7 +69,7 @@ def warn(msg: str):
     print(f"{Colors.YELLOW}  ⚠ {msg}{Colors.RESET}")
 
 # --- Git Helper Functions ---
-def run_git(repo_dir: str, *args, timeout=60) -> Tuple[int, str]:
+def run_git(repo_dir: str, *args, timeout=300) -> Tuple[int, str]:
     """Run git command and return (returncode, output)"""
     try:
         result = subprocess.run(
@@ -135,17 +135,24 @@ def process_repo(repo_dir: str, repo_url: str, strategy: str, action: str, work_
 
     repo_path = str(Path(work_dir) / repo_dir)
 
+    # Read-only actions should not clone
+    read_only_actions = ['status', 'untracked', 'ignored']
+
     if not Path(repo_path).is_dir():
-        logs.append(f"  Cloning '{repo_dir}'...")
-        ret, output = run_git(work_dir, 'clone', repo_url, repo_dir)
-        if output.strip():
-            for line in output.strip().split('\n'):
-                logs.append(f"    {line}")
-        if ret == 0:
-            logs.append(f"  ✓ Clone complete.")
+        if action in read_only_actions:
+            logs.append(f"  ⚠ Repository not cloned yet")
+            return logs
         else:
-            logs.append(f"  ✗ Clone failed.")
-        return logs
+            logs.append(f"  Cloning '{repo_dir}'...")
+            ret, output = run_git(work_dir, 'clone', repo_url, repo_dir)
+            if output.strip():
+                for line in output.strip().split('\n'):
+                    logs.append(f"    {line}")
+            if ret == 0:
+                logs.append(f"  ✓ Clone complete.")
+            else:
+                logs.append(f"  ✗ Clone failed.")
+            return logs
 
     if action == 'sync':
         # Commit uncommitted changes
@@ -952,10 +959,10 @@ def run_cli_fetch(repos: Optional[List[str]] = None, work_dir: str = "."):
 
 def main():
     """Main entry point for CLI and TUI"""
+    subprocess.run(['git', 'config', '--global', '--add', 'safe.directory', '*'], check=False)
     parser = argparse.ArgumentParser(
         description='gcl.py - Git Clone/Pull/Push Manager',
-        formatter_class=argparse.RawTextHelpFormatter,
-        add_help=False # We will handle help manually
+        formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument('command', nargs='?', default=None, help='Command to execute')
     parser.add_argument('args', nargs='*', help='Additional arguments for the command')
@@ -987,21 +994,24 @@ def main():
         print(f"  {Colors.GREEN}help{Colors.RESET}\t\t\tShows this help message.")
         sys.exit(0)
 
+    repos = args.args
     if cmd == 'sync':
-        strategy = args.args[0] if args.args else 'remote'
-        run_cli_sync(strategy)
+        strategy = 'remote'
+        if repos and repos[0] in ['local', 'remote']:
+            strategy = repos.pop(0)
+        run_cli_sync(strategy, repos=repos if repos else None)
     elif cmd == 'push':
-        run_cli_push()
+        run_cli_push(repos=repos if repos else None)
     elif cmd == 'pull':
-        run_cli_pull()
+        run_cli_pull(repos=repos if repos else None)
     elif cmd == 'status':
-        run_cli_status()
+        run_cli_status(repos=repos if repos else None)
     elif cmd == 'untracked':
-        run_cli_untracked()
+        run_cli_untracked(repos=repos if repos else None)
     elif cmd == 'ignored':
-        run_cli_ignored()
+        run_cli_ignored(repos=repos if repos else None)
     elif cmd == 'fetch':
-        run_cli_fetch()
+        run_cli_fetch(repos=repos if repos else None)
     else:
         error(f"Invalid command: {cmd}")
         parser.print_help()
