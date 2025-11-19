@@ -105,7 +105,7 @@ def get_repo_local_status(repo_dir: str) -> str:
 
     return "OK"
 
-def get_repo_remote_status(repo_dir: str) -> str:
+def get_repo_remote_status(repo_dir: str, do_fetch: bool = True) -> str:
     """Get remote repository status (unpulled commits after fetch)"""
     if not Path(repo_dir).is_dir():
         return "Not Cloned"
@@ -115,10 +115,11 @@ def get_repo_remote_status(repo_dir: str) -> str:
     if ret != 0:
         return "No Remote"
 
-    # Fetch from remote
-    ret, _ = run_git(repo_dir, 'fetch', '--quiet')
-    if ret != 0:
-        return "Fetch Failed"
+    # Fetch from remote only if requested
+    if do_fetch:
+        ret, _ = run_git(repo_dir, 'fetch', '--quiet')
+        if ret != 0:
+            return "Fetch Failed"
 
     # Check for unpulled commits
     ret, unpulled_out = run_git(repo_dir, 'log', 'HEAD..@{u}', '--oneline')
@@ -957,18 +958,70 @@ def run_cli_fetch(repos: Optional[List[str]] = None, work_dir: str = "."):
                 print(log_msg)
             print()
 
+def print_help():
+    """Print help message"""
+    print(f"{Colors.BOLD}{Colors.CYAN}gcl.py - Git Clone/Pull/Push Manager{Colors.RESET}\n")
+    print("Manages multiple git repositories via a TUI or command-line arguments.\n")
+    print(f"{Colors.BOLD}{Colors.YELLOW}USAGE:{Colors.RESET}")
+    print("  gcl.py [OPTIONS] [COMMAND] [REPOS...]\n")
+    print(f"{Colors.BOLD}{Colors.YELLOW}OPTIONS:{Colors.RESET}")
+    print(f"  {Colors.GREEN}-w, --workdir PATH{Colors.RESET}\tSet working directory (default: /home/diego/Documents/Git)")
+    print(f"  {Colors.GREEN}-c, --current{Colors.RESET}\t\tUse current directory as working directory")
+    print(f"  {Colors.GREEN}-h, --help{Colors.RESET}\t\tShow this help message\n")
+    print(f"{Colors.BOLD}{Colors.YELLOW}COMMANDS:{Colors.RESET}")
+    print(f"  (no command)\t\tLaunches the interactive TUI menu.")
+    print(f"  {Colors.GREEN}sync [local|remote]{Colors.RESET}\tBidirectional sync. Default: 'remote'.")
+    print(f"  {Colors.GREEN}push{Colors.RESET}\t\t\tPushes committed changes.")
+    print(f"  {Colors.GREEN}pull{Colors.RESET}\t\t\tPulls using 'remote' strategy.")
+    print(f"  {Colors.GREEN}fetch{Colors.RESET}\t\t\tFetches from remote.")
+    print(f"  {Colors.GREEN}status{Colors.RESET}\t\t\tChecks git status for existing repos only.")
+    print(f"  {Colors.GREEN}untracked{Colors.RESET}\t\tLists untracked files (excluding ignored).")
+    print(f"  {Colors.GREEN}ignored{Colors.RESET}\t\t\tLists all ignored files.\n")
+    print(f"{Colors.BOLD}{Colors.YELLOW}REPOS:{Colors.RESET}")
+    print(f"  Specify repository names to operate on (space-separated).")
+    print(f"  If not specified, operates on all repositories.\n")
+    print(f"{Colors.BOLD}{Colors.YELLOW}EXAMPLES:{Colors.RESET}")
+    print(f"  gcl.py\t\t\t\t# Launch TUI")
+    print(f"  gcl.py status\t\t\t\t# Check status of all repos")
+    print(f"  gcl.py -c status\t\t\t# Check status in current directory")
+    print(f"  gcl.py push front-Github_profile\t# Push specific repo")
+    print(f"  gcl.py sync remote ops-Tooling\t\t# Sync specific repo with remote strategy")
+
 def main():
     """Main entry point for CLI and TUI"""
     subprocess.run(['git', 'config', '--global', '--add', 'safe.directory', '*'], check=False)
     parser = argparse.ArgumentParser(
         description='gcl.py - Git Clone/Pull/Push Manager',
-        formatter_class=argparse.RawTextHelpFormatter
+        formatter_class=argparse.RawTextHelpFormatter,
+        add_help=False,
+        exit_on_error=False
     )
+    parser.add_argument('-w', '--workdir', type=str, default='/home/diego/Documents/Git',
+                        help='Working directory for repositories')
+    parser.add_argument('-c', '--current', action='store_true',
+                        help='Use current directory as working directory')
+    parser.add_argument('-h', '--help', action='store_true',
+                        help='Show help message')
     parser.add_argument('command', nargs='?', default=None, help='Command to execute')
-    parser.add_argument('args', nargs='*', help='Additional arguments for the command')
+    parser.add_argument('args', nargs='*', help='Additional arguments (strategy and/or repos)')
 
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args()
+    except argparse.ArgumentError as e:
+        error(f"Invalid argument: {e}")
+        print()
+        print_help()
+        sys.exit(1)
 
+    # Handle help
+    if args.help:
+        print_help()
+        sys.exit(0)
+
+    # Determine working directory
+    work_dir = '.' if args.current else args.workdir
+
+    # If no command, launch TUI
     if args.command is None:
         try:
             curses.wrapper(run_tui)
@@ -977,44 +1030,55 @@ def main():
         sys.exit(0)
 
     cmd = args.command.lower()
-    if cmd in ('help', '-h', '--help'):
-        print(f"{Colors.BOLD}{Colors.CYAN}gcl.py - Git Clone/Pull/Push Manager{Colors.RESET}\n")
-        print("Manages multiple git repositories via a TUI or command-line arguments.\n")
-        print(f"{Colors.BOLD}{Colors.YELLOW}USAGE:{Colors.RESET}")
-        print("  gcl.py [command] [options]\n")
-        print(f"{Colors.BOLD}{Colors.YELLOW}COMMANDS:{Colors.RESET}")
-        print(f"  (no command)\t\tLaunches the interactive TUI menu.")
-        print(f"  {Colors.GREEN}sync [local|remote]{Colors.RESET}\tBidirectional sync. Default: 'remote'.")
-        print(f"  {Colors.GREEN}push{Colors.RESET}\t\t\tPushes committed changes.")
-        print(f"  {Colors.GREEN}pull{Colors.RESET}\t\t\tPulls using 'remote' strategy.")
-        print(f"  {Colors.GREEN}fetch{Colors.RESET}\t\t\tFetches from remote.")
-        print(f"  {Colors.GREEN}status{Colors.RESET}\t\t\tChecks git status for all repos.")
-        print(f"  {Colors.GREEN}untracked{Colors.RESET}\t\tLists untracked files (excluding ignored).")
-        print(f"  {Colors.GREEN}ignored{Colors.RESET}\t\t\tLists all ignored files.")
-        print(f"  {Colors.GREEN}help{Colors.RESET}\t\t\tShows this help message.")
+
+    # Handle help command
+    if cmd in ('help',):
+        print_help()
         sys.exit(0)
 
-    repos = args.args
+    # Parse repos from args
+    repos = args.args if args.args else None
+
+    # Validate repository names if provided
+    if repos:
+        # For sync command, skip strategy argument if present
+        repos_to_validate = repos.copy()
+        if cmd == 'sync' and repos_to_validate and repos_to_validate[0] in ['local', 'remote']:
+            repos_to_validate = repos_to_validate[1:]
+
+        # Check if any repo names are invalid
+        invalid_repos = [r for r in repos_to_validate if r not in ALL_REPOS]
+        if invalid_repos:
+            error(f"Invalid repository name(s): {', '.join(invalid_repos)}")
+            print()
+            print(f"{Colors.BOLD}{Colors.YELLOW}Available repositories:{Colors.RESET}")
+            for repo_name in sorted(ALL_REPOS.keys()):
+                print(f"  - {repo_name}")
+            print()
+            print_help()
+            sys.exit(1)
+
     if cmd == 'sync':
         strategy = 'remote'
         if repos and repos[0] in ['local', 'remote']:
             strategy = repos.pop(0)
-        run_cli_sync(strategy, repos=repos if repos else None)
+        run_cli_sync(strategy, repos=repos if repos else None, work_dir=work_dir)
     elif cmd == 'push':
-        run_cli_push(repos=repos if repos else None)
+        run_cli_push(repos=repos, work_dir=work_dir)
     elif cmd == 'pull':
-        run_cli_pull(repos=repos if repos else None)
+        run_cli_pull(repos=repos, work_dir=work_dir)
     elif cmd == 'status':
-        run_cli_status(repos=repos if repos else None)
+        run_cli_status(repos=repos, work_dir=work_dir)
     elif cmd == 'untracked':
-        run_cli_untracked(repos=repos if repos else None)
+        run_cli_untracked(repos=repos, work_dir=work_dir)
     elif cmd == 'ignored':
-        run_cli_ignored(repos=repos if repos else None)
+        run_cli_ignored(repos=repos, work_dir=work_dir)
     elif cmd == 'fetch':
-        run_cli_fetch(repos=repos if repos else None)
+        run_cli_fetch(repos=repos, work_dir=work_dir)
     else:
         error(f"Invalid command: {cmd}")
-        parser.print_help()
+        print()
+        print_help()
         sys.exit(1)
 
 
