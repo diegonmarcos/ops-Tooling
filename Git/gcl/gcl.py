@@ -986,10 +986,27 @@ def print_help():
     print(f"  gcl.py -c status\t\t\t# Check status in current directory")
     print(f"  gcl.py push front-Github_profile\t# Push specific repo")
     print(f"  gcl.py sync remote ops-Tooling\t\t# Sync specific repo with remote strategy")
+    print(f"\n{Colors.BOLD}{Colors.YELLOW}NOTE:{Colors.RESET}")
+    print(f"  Git safe.directory is automatically configured for the working directory.")
+
+def configure_safe_directories(work_dir: str):
+    """Configure git safe.directory for the working directory and all repos"""
+    # Add the working directory itself
+    work_dir_abs = str(Path(work_dir).absolute())
+    subprocess.run(['git', 'config', '--global', '--add', 'safe.directory', work_dir_abs],
+                   check=False, capture_output=True)
+
+    # Add wildcard for all subdirectories (repos)
+    safe_pattern = f"{work_dir_abs}/*"
+    subprocess.run(['git', 'config', '--global', '--add', 'safe.directory', safe_pattern],
+                   check=False, capture_output=True)
+
+    # Also add the universal wildcard as fallback
+    subprocess.run(['git', 'config', '--global', '--add', 'safe.directory', '*'],
+                   check=False, capture_output=True)
 
 def main():
     """Main entry point for CLI and TUI"""
-    subprocess.run(['git', 'config', '--global', '--add', 'safe.directory', '*'], check=False)
     parser = argparse.ArgumentParser(
         description='gcl.py - Git Clone/Pull/Push Manager',
         formatter_class=argparse.RawTextHelpFormatter,
@@ -1020,6 +1037,9 @@ def main():
 
     # Determine working directory
     work_dir = '.' if args.current else args.workdir
+
+    # Configure safe directories automatically (silently)
+    configure_safe_directories(work_dir)
 
     # If no command, launch TUI
     if args.command is None:
