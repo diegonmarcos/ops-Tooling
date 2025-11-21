@@ -83,13 +83,13 @@ def run_git(repo_dir: str, *args, timeout=300) -> Tuple[int, str]:
         return 1, str(e)
 
 def get_repo_local_status(repo_dir: str) -> str:
-    """Get local repository status (uncommitted changes, unpushed commits)"""
+    """Get local repository status (uncommitted changes, unpushed commits, and untracked files)"""
     if not Path(repo_dir).is_dir():
         return "Not Cloned"
 
-    # Check for uncommitted changes
-    ret, _ = run_git(repo_dir, 'diff-index', '--quiet', 'HEAD', '--')
-    if ret != 0:
+    # Check for uncommitted changes (staged and unstaged) and untracked files
+    _, porcelain_output = run_git(repo_dir, 'status', '--porcelain')
+    if porcelain_output.strip():
         return "Uncommitted"
 
     # Check if branch tracks a remote
@@ -265,11 +265,10 @@ def process_repo(repo_dir: str, repo_url: str, strategy: str, action: str, work_
     elif action == 'status':
         logs.append(f"  Checking '{repo_dir}'")
 
-        # Check for uncommitted changes
-        ret, _ = run_git(repo_path, 'diff-index', '--quiet', 'HEAD', '--')
-        if ret != 0:
-            logs.append("  ⚠ Has uncommitted changes")
-            _, status_output = run_git(repo_path, 'status', '--short')
+        # Check for uncommitted changes and untracked files
+        _, status_output = run_git(repo_path, 'status', '--short')
+        if status_output.strip():
+            logs.append("  ⚠ Has uncommitted changes or untracked files")
             for line in status_output.strip().split('\n')[:5]:
                 logs.append(f"    {line}")
         else:
@@ -458,12 +457,12 @@ class TUI:
 
         # Actions with new layout and order
         actions_data = [
-            (0, "SYNC", "S", "(Commit, Fetch, Pull, Commit, Push)"),
+            (0, "SYNC", "S", "(Add/Commit, Fetch, Pull, Add/Commit, Push)"),
             (1, "FETCH", "F", "(Get from Remote)"),
             (2, "PULL", "L", "(Merge from Remote)"),
             (3, "PUSH", "P", "(Merge from Local)"),
             (None, None, None, None),  # blank line
-            (4, "STATUS", "T", "(Check Local Uncommitted)"),
+            (4, "STATUS", "T", "(Check Local Untracked and Uncommitted)"),
             (5, "UNTRACKED", "N", "(List untracked files)"),
             (6, "IGNORED", "I", "(List ignored files)"),
         ]
@@ -972,11 +971,11 @@ def print_help():
     print(f"  {Colors.GREEN}-h, --help{Colors.RESET}\t\tShow this help message\n")
     print(f"{Colors.BOLD}{Colors.YELLOW}COMMANDS:{Colors.RESET}")
     print(f"  (no command)\t\tLaunches the interactive TUI menu.")
-    print(f"  {Colors.GREEN}sync [local|remote]{Colors.RESET}\tBidirectional sync. Default: 'remote'.")
+    print(f"  {Colors.GREEN}sync [local|remote]{Colors.RESET}\tBidirectional sync. (Add/Commit, Fetch, Pull, Add/Commit, Push). Default: 'remote'.")
     print(f"  {Colors.GREEN}push{Colors.RESET}\t\t\tPushes committed changes.")
     print(f"  {Colors.GREEN}pull{Colors.RESET}\t\t\tPulls using 'remote' strategy.")
     print(f"  {Colors.GREEN}fetch{Colors.RESET}\t\t\tFetches from remote.")
-    print(f"  {Colors.GREEN}status{Colors.RESET}\t\t\tChecks git status for existing repos only.")
+    print(f"  {Colors.GREEN}status{Colors.RESET}\t\t\tChecks for local untracked and uncommitted changes.")
     print(f"  {Colors.GREEN}untracked{Colors.RESET}\t\tLists untracked files (excluding ignored).")
     print(f"  {Colors.GREEN}ignored{Colors.RESET}\t\t\tLists all ignored files.\n")
     print(f"{Colors.BOLD}{Colors.YELLOW}REPOS:{Colors.RESET}")
