@@ -62,7 +62,9 @@ show_help() {
 
     printf "${C_BOLD}OPTIONS${C_RESET}\n"
     printf "${C_GRAY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
-    printf "  ${C_GREEN}--help, -h${C_RESET}\t\t\t${C_GRAY}Show this help message${C_RESET}\n\n"
+    printf "  ${C_GREEN}--help, -h${C_RESET}\t\t\t${C_GRAY}Show this help message${C_RESET}\n"
+    printf "  ${C_GREEN}--install${C_RESET}\t\t\t${C_GRAY}This will fetch the bin files from the remoto repo${C_RESET}\n"
+    printf "  ${C_GREEN}--install_dev${C_RESET}\t\t\t${C_GRAY}Fetch the repo tools and symlink it${C_RESET}\n\n"
 
     printf "${C_BOLD}SETUP${C_RESET}\n"
     printf "${C_GRAY}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
@@ -145,10 +147,111 @@ run_sh() {
     "$SCRIPT_DIR/gcl/gcl.sh" "$@"
 }
 
+# Run via shell script
+run_sh() {
+    "$SCRIPT_DIR/gcl/gcl.sh" "$@"
+}
+
+# Run installer
+run_install() {
+    printf "${C_CYAN}==>${C_RESET} ${C_BOLD}Starting gcl installation...${C_RESET}\n"
+
+    REPO_URL="git@github.com:diegonmarcos/ops-Tooling.git"
+    INSTALL_DIR="gcl_install_temp"
+
+    # Clone the repo
+    printf "Cloning repository from ${REPO_URL}...\n"
+    if ! git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"; then
+        printf "Error: Failed to clone repository. Make sure you have SSH access and the repository exists.\n" >&2
+        exit 1
+    fi
+
+    # Check if the gcl folder exists in the cloned repo
+    if [ ! -d "$INSTALL_DIR/Git/gcl" ]; then
+        printf "Error: 'Git/gcl' directory not found in the cloned repository. Expected structure: ops-Tooling/Git/gcl\n" >&2
+        rm -rf "$INSTALL_DIR"
+        exit 1
+    fi
+
+    # Move the gcl folder
+    printf "Installing gcl...\n"
+    rm -rf ./gcl
+    mv "$INSTALL_DIR/Git/gcl" ./gcl
+
+    # Cleanup
+    printf "Cleaning up...\n"
+    rm -rf "$INSTALL_DIR"
+
+    printf "${C_GREEN}==>${C_RESET} ${C_BOLD}gcl installed successfully.${C_RESET}\n"
+}
+
+
+# Run developer installer
+run_install_dev() {
+    printf "${C_CYAN}==>${C_RESET} ${C_BOLD}Setting up developer environment (symlink mode)...${C_RESET}\n"
+
+    REPO_URL="git@github.com:diegonmarcos/ops-Tooling.git"
+    CLONE_DIR_NAME="ops-Tooling-dev"
+    # Place it in the parent of SCRIPT_DIR
+    CLONE_DIR_PATH="$(dirname "$SCRIPT_DIR")/$CLONE_DIR_NAME"
+
+    if [ -d "$CLONE_DIR_PATH" ]; then
+        printf "Dev repository already exists. Pulling latest changes from ${REPO_URL}...\n"
+        if ! git -C "$CLONE_DIR_PATH" pull; then
+            printf "Error: Failed to pull latest changes. Please check for conflicts in ${CLONE_DIR_PATH}\n" >&2
+            exit 1
+        fi
+    else
+        printf "Cloning dev repository from ${REPO_URL} into ${CLONE_DIR_PATH}...\n"
+        if ! git clone "$REPO_URL" "$CLONE_DIR_PATH"; then
+            printf "Error: Failed to clone repository. Make sure you have SSH access and the repository exists.\n" >&2
+            exit 1
+        fi
+    fi
+
+    # The gcl.sh to link to, inside the cloned repo
+    TARGET_GCL_SH="$CLONE_DIR_PATH/Git/gcl.sh"
+    # The symlink we want to create
+    SYMLINK_PATH="$SCRIPT_DIR/gcl.sh"
+
+    # Check if the target file exists
+    if [ ! -f "$TARGET_GCL_SH" ]; then
+        printf "Error: Target file not found in cloned repository: ${TARGET_GCL_SH}\n" >&2
+        exit 1
+    fi
+
+    printf "Creating symlink to development version of gcl.sh...\n"
+
+    # Remove the original file only if it is not a symlink.
+    if [ -f "$SYMLINK_PATH" ] && [ ! -L "$SYMLINK_PATH" ]; then
+        printf "Removing original gcl.sh file...\n"
+        rm "$SYMLINK_PATH"
+    elif [ -L "$SYMLINK_PATH" ]; then
+        # If it's already a symlink, remove it to update it.
+        rm "$SYMLINK_PATH"
+    fi
+
+    # Create a relative symlink from the current script dir
+    printf "Symlinking ./gcl.sh -> ../${CLONE_DIR_NAME}/Git/gcl.sh\n"
+    cd "$SCRIPT_DIR"
+    ln -s "../${CLONE_DIR_NAME}/Git/gcl.sh" "gcl.sh"
+
+    printf "${C_GREEN}==>${C_RESET} ${C_BOLD}Developer environment setup complete.${C_RESET}\n"
+    printf "'gcl.sh' is now a symlink. Run it to use the development version.\n"
+}
+
 # Main
 case "${1:-}" in
     --help|-h)
         show_help
+        exit 0
+        ;;
+    --install)
+        run_install
+        exit 0
+        ;;
+    --install_dev)
+        run_install_dev
         exit 0
         ;;
     --py_docker|--docker)

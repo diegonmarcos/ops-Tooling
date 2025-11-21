@@ -105,8 +105,8 @@ _get_repo_status() {
         return
     fi
 
-    # Check for uncommitted changes (staged and unstaged)
-    if ! git -C "$repo_dir" diff-index --quiet HEAD -- 2>/dev/null; then
+    # Check for uncommitted changes (staged and unstaged) and untracked files
+    if [ -n "$(git -C "$repo_dir" status --porcelain 2>/dev/null)" ]; then
         printf "${C_RED}Uncommitted${C_RESET}"
         return
     fi
@@ -589,7 +589,7 @@ draw_interface() {
     _move_cursor $((_line + 1)) 2; printf "${C_BLUE}═══════${C_RESET}"
 
     _line=$((_line + 2)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] ${C_YELLOW}${C_BOLD}S${C_RESET}YNC   (Remote <-> Local)" "$([ "$_action_selected" -eq 0 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] ${C_YELLOW}${C_BOLD}S${C_RESET}YNC   (Add/Commit, Fetch, Pull, Add/Commit, Push)" "$([ "$_action_selected" -eq 0 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 0 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -597,7 +597,7 @@ draw_interface() {
     fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] ${C_YELLOW}${C_BOLD}P${C_RESET}USH   (Local -> Remote)" "$([ "$_action_selected" -eq 1 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] ${C_YELLOW}${C_BOLD}P${C_RESET}USH   (Merge from Local)" "$([ "$_action_selected" -eq 1 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 1 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -605,7 +605,7 @@ draw_interface() {
     fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] PU${C_YELLOW}${C_BOLD}L${C_RESET}L (Remote -> Local)" "$([ "$_action_selected" -eq 2 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] PU${C_YELLOW}${C_BOLD}L${C_RESET}L (Merge from Remote)" "$([ "$_action_selected" -eq 2 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 2 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -615,7 +615,7 @@ draw_interface() {
     _line=$((_line + 1)); # Jump line
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] S${C_YELLOW}${C_BOLD}T${C_RESET}ATUS (Check repos)" "$([ "$_action_selected" -eq 3 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] S${C_YELLOW}${C_BOLD}T${C_RESET}ATUS (Check Local Untracked and Uncommitted)" "$([ "$_action_selected" -eq 3 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 3 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -623,7 +623,7 @@ draw_interface() {
     fi
 
     _line=$((_line + 1)); _move_cursor $_line 4
-    _line_text=$(printf "[%s] ${C_YELLOW}${C_BOLD}F${C_RESET}ETCH (Fetch from remote)" "$([ "$_action_selected" -eq 4 ] && printf "●" || printf " ")")
+    _line_text=$(printf "[%s] ${C_YELLOW}${C_BOLD}F${C_RESET}ETCH (Get from Remote)" "$([ "$_action_selected" -eq 4 ] && printf "●" || printf " ")")
     if [ "$_current_field" -eq 2 ] && [ "$_action_selected" -eq 4 ]; then
         printf "${C_BG_BLUE}%s" "$_line_text"; tput el; printf "${C_RESET}"
     else
@@ -1113,11 +1113,11 @@ show_help() {
     printf "  ${C_BOLD}gcl.sh${C_RESET} [command] [options]\n\n"
     printf "${C_BOLD}${C_YELLOW}COMMANDS:${C_RESET}\n"
     printf "  (no command)\t\tLaunches the interactive TUI menu.\n"
-    printf "  ${C_GREEN}sync [local|remote]${C_RESET}\tBidirectional sync. Default: 'remote'.\n"
+    printf "  ${C_GREEN}sync [local|remote]${C_RESET}\tBidirectional sync. (Add/Commit, Fetch, Pull, Add/Commit, Push). Default: 'remote'.\n"
     printf "  ${C_GREEN}push${C_RESET}\t\t\tPushes committed changes.\n"
     printf "  ${C_GREEN}pull${C_RESET}\t\t\tPulls using 'remote' strategy.\n"
     printf "  ${C_GREEN}fetch${C_RESET}\t\t\tFetches from remote.\n"
-    printf "  ${C_GREEN}status${C_RESET}\t\t\tChecks git status for all repos.\n"
+    printf "  ${C_GREEN}status${C_RESET}\t\t\tChecks for local untracked and uncommitted changes.\n"
     printf "  ${C_GREEN}untracked${C_RESET}\t\tLists untracked files (excluding ignored).\n"
     printf "  ${C_GREEN}ignored${C_RESET}\t\tLists ignored files.\n"
     printf "  ${C_GREEN}help${C_RESET}\t\t\tShows this help message.\n\E[0m\n"
