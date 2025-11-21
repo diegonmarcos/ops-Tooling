@@ -758,6 +758,7 @@ class TUI:
         elif key == ord('f'):  # Fetch action
             self.action_selected = 1
             self.refresh_remote_status()
+            self.draw()
 
         elif key == ord('l'):  # Pull action
             self.action_selected = 2
@@ -768,6 +769,7 @@ class TUI:
         elif key == ord('t'):  # Status action
             self.action_selected = 4
             self.refresh_local_status()
+            self.draw()
 
         elif key == ord('n'):  # Untracked action
             self.action_selected = 5
